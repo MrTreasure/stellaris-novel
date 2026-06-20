@@ -4,73 +4,85 @@ import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import Chart from '@/components/StatsChart';
 
-// ===== Event Chain Helpers =====
+// ===== Dynamic Event Chain Builder =====
+
+const CATEGORY_ICONS: Record<string, string> = {
+  megastructure: '🏗️', colonization: '🌍', exploration: '🔭',
+  war: '⚔️', crisis: '🦠', diplomacy: '👽', technology: '🔬',
+  resource: '💎', event: '📜', military: '🚀', achievement: '🏆',
+  policy: '📋', science: '🧪', collection: '🏺', economy: '💰',
+};
+const CATEGORY_LABELS: Record<string, string> = {
+  megastructure: '巨型结构', colonization: '殖民扩张', exploration: '探索发现',
+  war: '战争史', crisis: '危机事件', diplomacy: '外交接触', technology: '科技',
+  resource: '战略资源', event: '故事事件', military: '军事', achievement: '成就',
+  policy: '政策法令', science: '科学研究', collection: '收藏', economy: '经济',
+  other: '其他',
+};
 
 function buildLocalChains(milestones: any[]) {
-  const used = new Set<number>();
-  const chains: { id: string; name: string; category: string; events: any[] }[] = [];
-
-  function addChain(id: string, name: string, filter: (m: any) => boolean) {
-    const events = milestones.filter(m => filter(m) && !used.has(m.id));
-    if (events.length > 0) {
-      events.forEach(e => used.add(e.id));
-      chains.push({ id, name, category: '', events });
-    }
+  // Group by category
+  const groups = new Map<string, any[]>();
+  for (const m of milestones) {
+    const cat = m.event_type || 'other';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat)!.push(m);
   }
 
-  addChain('dyson', '⭐ 戴森球工程', (m: any) => m.title?.includes('戴森球') || m.raw_flag?.includes('dyson'));
-  addChain('thinktank', '🧠 科学枢纽', (m: any) => m.title?.includes('科学枢纽') || m.raw_flag?.includes('think_tank'));
-  addChain('colossus', '☄️ 巨像计划', (m: any) => m.title?.includes('巨像') || m.raw_flag?.includes('colossus'));
-  addChain('mega', '🏗️ 巨型结构', (m: any) => m.event_type === 'megastructure');
-  addChain('wars', '⚔️ 战争史', (m: any) => m.event_type === 'war');
-  addChain('crisis', '🦠 危机事件', (m: any) => m.event_type === 'crisis');
-  addChain('colony', '🌍 殖民扩张', (m: any) => m.event_type === 'colonization');
-  addChain('explore', '🔭 探索发现', (m: any) => m.event_type === 'exploration');
-  addChain('tech', '🔬 科技突破', (m: any) => m.event_type === 'technology');
-  addChain('contact', '👽 外交接触', (m: any) => m.event_type === 'diplomacy');
-
-  // 剩余未分类的
-  const rest = milestones.filter(m => !used.has(m.id));
-  if (rest.length > 0) chains.push({ id: 'other', name: '📋 其他', category: 'misc', events: rest });
-
-  return chains;
+  // Sort groups by event count (most events first)
+  return [...groups.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([cat, events]) => ({
+      id: cat,
+      name: `${CATEGORY_ICONS[cat] || '📌'} ${CATEGORY_LABELS[cat] || cat}`,
+      category: cat,
+      events,
+    }));
 }
 
 function ChainSection({ chain }: { chain: { id: string; name: string; events: any[] } }) {
   const [expanded, setExpanded] = useState(false);
-  const showExpand = chain.events.length > 5;
-  const displayEvents = expanded ? chain.events : chain.events.slice(0, 5);
+  const showExpand = chain.events.length > 8;
+  const displayEvents = expanded ? chain.events : chain.events.slice(0, 8);
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-2">
         <span className="text-sm font-semibold text-gray-400">{chain.name}</span>
         <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">{chain.events.length}</span>
       </div>
-      <div className="relative pl-4 border-l border-gray-800/60 space-y-2">
+      <div className="relative pl-4 border-l border-gray-800/50 space-y-1.5">
         {displayEvents.map((m, i) => (
           <div key={m.id || i} className="relative group">
-            {/* timeline dot */}
-            <div className={`absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-gray-900 ${
+            <div className={`absolute -left-[19px] top-1.5 w-2 h-2 rounded-full border-2 border-gray-900 ${
               m.importance === 'critical' ? 'bg-red-500 border-red-600' :
               m.importance === 'major' ? 'bg-yellow-500 border-yellow-600' :
               'bg-gray-700 border-gray-800'
             }`} />
-            <div className="p-2.5 bg-gray-900/60 hover:bg-gray-800/60 rounded-lg transition-colors border border-gray-800/40">
-              <div className="flex items-start gap-3">
-                <span className="text-[11px] text-gray-600 font-mono shrink-0 mt-0.5 w-12">{m.event_date}</span>
+            <div className="p-2 bg-gray-900/50 hover:bg-gray-800/50 rounded-lg transition-colors border border-gray-800/30">
+              <div className="flex items-start gap-2">
+                <span className="text-[10px] text-gray-600 font-mono shrink-0 mt-0.5 w-12">{m.event_date}</span>
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm text-gray-300">{m.title}</span>
-                  {m.loc_name && <span className="text-xs text-cyan-400/60 ml-2">{m.loc_name}</span>}
-                  {m.loc_desc && <p className="text-xs text-gray-600 mt-1 line-clamp-2">{m.loc_desc}</p>}
+                  <span className="text-xs text-gray-300">{m.title || m.raw_flag}</span>
+                  {m.loc_name && m.loc_name !== m.title && (
+                    <span className="text-[10px] text-cyan-400/50 ml-1.5">{m.loc_name}</span>
+                  )}
+                  {m.loc_desc && (
+                    <p className="text-[10px] text-gray-600 mt-0.5 line-clamp-1">{m.loc_desc}</p>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         ))}
         {showExpand && !expanded && (
-          <button onClick={() => setExpanded(true)} className="text-xs text-cyan-500 hover:text-cyan-400 pl-2 py-1">
-            + 展开 {chain.events.length - 5} 条...
+          <button onClick={() => setExpanded(true)} className="text-[11px] text-cyan-500 hover:text-cyan-400 pl-2 py-0.5">
+            + 展开剩余 {chain.events.length - 8} 条...
+          </button>
+        )}
+        {showExpand && expanded && (
+          <button onClick={() => setExpanded(false)} className="text-[11px] text-gray-500 hover:text-gray-400 pl-2 py-0.5">
+            收起
           </button>
         )}
       </div>
