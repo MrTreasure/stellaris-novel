@@ -12,130 +12,90 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(s => {
-        setApiKey(s.api_key || '');
-        setBaseUrl(s.base_url || 'https://api.deepseek.com');
-        setModel(s.model || 'deepseek-chat');
-      })
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, [])
+    fetch('/api/settings').then(r => r.json()).then(s => {
+      setApiKey(s.api_key || ''); setBaseUrl(s.base_url || 'https://api.deepseek.com'); setModel(s.model || 'deepseek-chat');
+    }).catch(() => {}).finally(() => setLoaded(true));
+  }, []);
 
   const saveSetting = async (key: string, value: string) => {
     setSaving(key);
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    });
+    await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) });
     setSaving('');
   };
 
   const testConnection = async () => {
-    setTesting(true);
-    setTestResult(null);
+    setTesting(true); setTestResult(null);
     try {
-      const res = await fetch('/api/test-ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          config: { api_key: apiKey, base_url: baseUrl, model },
-        }),
-      });
-      const data = await res.json();
-      setTestResult(data);
-    } catch (e: any) {
-      setTestResult({ ok: false, message: e.message });
-    } finally {
-      setTesting(false);
-    }
+      const r = await fetch('/api/test-ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: { api_key: apiKey, base_url: baseUrl, model } }) });
+      setTestResult(await r.json());
+    } catch (e: any) { setTestResult({ ok: false, message: e.message }); }
+    finally { setTesting(false); }
   };
 
-  if (!loaded) return <div className="max-w-4xl mx-auto px-4 py-8 text-gray-500">加载中...</div>;
+  if (!loaded) return <div className="max-w-3xl mx-auto px-4 py-8 text-gray-600">加载中...</div>;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">设置</h1>
+      <div className="flex items-center gap-3 mb-2">
+        <span className="w-2 h-2 rounded-full bg-cyan-400" />
+        <span className="text-xs text-cyan-400/80 font-mono tracking-wider uppercase">SYSTEM CONFIGURATION</span>
+      </div>
+      <h1 className="text-3xl font-bold text-gray-200 mb-8">系统设置</h1>
 
-      {/* AI 服务设置 */}
-      <section className="mb-10">
-        <h2 className="text-xl font-bold mb-4">🤖 AI 服务配置</h2>
+      {/* AI Config */}
+      <div className="bg-gray-900/80 backdrop-blur-xl border border-cyan-800/30 rounded-2xl p-6 shadow-[0_0_40px_rgba(8,145,178,0.1)] mb-8">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+          <span className="text-xs text-cyan-400/80 font-mono tracking-wider uppercase">AI NEURAL INTERFACE</span>
+        </div>
+
         <div className="space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-1">API Endpoint (Base URL)</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={baseUrl}
-                onChange={e => { setBaseUrl(e.target.value); saveSetting('base_url', e.target.value); }}
-                className="flex-1 px-3 py-2 bg-gray-900 text-gray-100 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
-                placeholder="https://api.deepseek.com"
-              />
-              <span className="text-xs text-gray-600 self-center whitespace-nowrap">{saving === 'base_url' ? '⏳' : ''}</span>
-            </div>
+            <label className="block text-xs text-gray-500 uppercase tracking-wider mb-1.5">API Endpoint</label>
+            <input type="text" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); saveSetting('base_url', e.target.value); }}
+              className="w-full px-3 py-2.5 bg-gray-900 text-gray-200 border border-gray-700/60 focus:border-cyan-600 rounded-lg text-sm outline-none transition-colors font-mono"
+              placeholder="https://api.deepseek.com" />
           </div>
-
           <div>
-            <label className="block text-sm text-gray-400 mb-1">API Key</label>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={e => { setApiKey(e.target.value); saveSetting('api_key', e.target.value); }}
-                className="flex-1 px-3 py-2 bg-gray-900 text-gray-100 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none font-mono"
-                placeholder="sk-..."
-              />
-            </div>
+            <label className="block text-xs text-gray-500 uppercase tracking-wider mb-1.5">API Key</label>
+            <input type="password" value={apiKey} onChange={e => { setApiKey(e.target.value); saveSetting('api_key', e.target.value); }}
+              className="w-full px-3 py-2.5 bg-gray-900 text-gray-200 border border-gray-700/60 focus:border-cyan-600 rounded-lg text-sm outline-none transition-colors font-mono"
+              placeholder="sk-..." />
           </div>
-
           <div>
-            <label className="block text-sm text-gray-400 mb-1">模型名</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={model}
-                onChange={e => { setModel(e.target.value); saveSetting('model', e.target.value); }}
-                className="flex-1 px-3 py-2 bg-gray-900 text-gray-100 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
-                placeholder="deepseek-chat"
-  />
-            </div>
-            <p className="text-xs text-gray-600 mt-1">支持所有 OpenAI 兼容模型: deepseek-chat / claude-sonnet-4-6 / gpt-4o / qwen-plus 等</p>
+            <label className="block text-xs text-gray-500 uppercase tracking-wider mb-1.5">Model</label>
+            <input type="text" value={model} onChange={e => { setModel(e.target.value); saveSetting('model', e.target.value); }}
+              className="w-full px-3 py-2.5 bg-gray-900 text-gray-200 border border-gray-700/60 focus:border-cyan-600 rounded-lg text-sm outline-none transition-colors"
+              placeholder="deepseek-chat" />
+            <p className="text-[11px] text-gray-600 mt-1.5">支持 OpenAI 兼容 API: deepseek / claude / gpt / qwen 等</p>
           </div>
 
-          <div className="flex gap-3 pt-2">
-            <button
-              onClick={testConnection}
-              disabled={testing || !apiKey}
-              className="px-5 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
-            >
+          <div className="flex items-center gap-4 pt-2">
+            <button onClick={testConnection} disabled={testing || !apiKey}
+              className="px-5 py-2.5 bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-800 disabled:text-gray-600 text-white rounded-lg text-sm font-medium transition-all shadow-[0_0_15px_rgba(8,145,178,0.3)]">
               {testing ? '⏳ 测试中...' : '🔄 测试连接'}
             </button>
             {testResult && (
-              <span className={`self-center text-sm ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`text-sm font-medium ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>
                 {testResult.ok ? '✅ 连接成功' : `❌ ${testResult.message}`}
               </span>
             )}
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* 游戏数据状态 */}
-      <section className="mb-10">
-        <h2 className="text-xl font-bold mb-4">🎮 游戏数据</h2>
-        <div className="space-y-2">
-          <p className="text-sm text-gray-400">
-            游戏数据通过命令行离线预加载。运行 <code className="text-xs bg-gray-800 px-1.5 py-0.5 rounded text-gray-300">node scripts/preload-all.mjs</code> 同步最新数据。
-          </p>
-          <p className="text-sm text-gray-400">
-            游戏升级后重新运行即可增量同步，仅更新变化的文件。
-          </p>
-          <p className="text-xs text-gray-600 mt-1">
-            数据源: G:\SteamLibrary\steamapps\common\Stellaris
-          </p>
+      {/* Data Info */}
+      <div className="bg-gray-900/80 backdrop-blur-xl border border-cyan-800/30 rounded-2xl p-6 shadow-[0_0_40px_rgba(8,145,178,0.1)]">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+          <span className="text-xs text-cyan-400/80 font-mono tracking-wider uppercase">DATA CORE STATUS</span>
         </div>
-      </section>
+        <p className="text-sm text-gray-400">游戏数据通过离线脚本预加载，启动前运行:</p>
+        <code className="block mt-2 px-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-xs text-green-400/80 font-mono">
+          node scripts/preload-all.mjs
+        </code>
+        <p className="text-xs text-gray-600 mt-2">数据源: G:\SteamLibrary\steamapps\common\Stellaris</p>
+      </div>
     </div>
   );
 }
