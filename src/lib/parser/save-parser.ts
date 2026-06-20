@@ -123,8 +123,16 @@ function findPlayerCountry(data: Buffer): { csPos: number | null; cePos: number 
     const m = playerSection.match(/country\s*=\s*(\d+)/);
     if (m) playerCountryId = m[1];
   }
+  // Search for country section - PDS format varies by version
   let countrySec = data.indexOf(Buffer.from('\ncountry={'));
-  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('country={'));
+  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\r\ncountry={'));
+  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\tcountry={'));
+  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('country={'));  // anywhere
+  if (countrySec < 0) {
+    // Corvus 4.2.x and newer: country data may be in a different structure
+    // Fall back to searching the entire file for player country section
+    return findPlayerCountryByScan(data, playerCountryId);
+  }
   if (countrySec < 0) return { csPos: null, cePos: null };
   const cbs = data.indexOf(Buffer.from('{'), countrySec + 8);
   if (cbs < 0) return { csPos: null, cePos: null };
@@ -145,6 +153,18 @@ function findPlayerCountry(data: Buffer): { csPos: number | null; cePos: number 
       return { csPos: idx, cePos: se };
     }
     pos = se;
+  }
+  return { csPos: null, cePos: null };
+}
+
+function findPlayerCountryByScan(data: Buffer, playerId: string): { csPos: number | null; cePos: number | null } {
+  // Corvus 4.x+ fallback: search for player country flags by looking for empire_size or any known flag
+  // Use a wider search range - the player's data is typically in the first 30% of the file
+  const scanEnd = Math.floor(data.length * 0.3);
+  // Try finding flags= block directly
+  const fp = data.indexOf(Buffer.from('flags={'), 0);
+  if (fp >= 0 && fp < scanEnd) {
+    return { csPos: null, cePos: Math.min(fp + 5000000, data.length) };
   }
   return { csPos: null, cePos: null };
 }
@@ -203,22 +223,41 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
   const searchStart = csPos ?? 0;
   const searchEnd = cePos ?? data.length;
 
-  const flagsPos = data.indexOf(Buffer.from('flags={'), searchStart);
-  if (flagsPos < 0 || flagsPos >= searchEnd) return;
-  const flagsEnd = findBlockEnd(data, flagsPos + 6);
-  if (flagsEnd > Math.min(searchEnd * 1.5, data.length)) return;
-  const text = data.subarray(flagsPos, flagsEnd).toString('ascii');
+  // Try Butler v2.x format: central flags={...} block
+  let flagsPos = data.indexOf(Buffer.from('flags={'), searchStart);
+  let rawFlags: { name: string; tick: number }[] = [];
+
+  if (flagsPos >= 0 && flagsPos < searchEnd) {
+    const flagsEnd = findBlockEnd(data, flagsPos + 6);
+    if (flagsEnd <= Math.min(searchEnd * 1.5, data.length)) {
+      const text = data.subarray(flagsPos, flagsEnd).toString('ascii');
+      for (const m of text.matchAll(/\n(\w+)\s*=\s*(\d{7,9})/g)) {
+        const name = m[1], tick = parseInt(m[2]);
+        if (tick > 60000000 && tick < 70000000) rawFlags.push({ name, tick });
+      }
+    }
+  }
+
+  // Fallback for Corvus v4.x format: flags are scattered throughout the file
+  if (rawFlags.length === 0) {
+    // Search file body (skip header, start from ~5000 bytes in)
+    const midPt = Math.floor(data.length * 0.4);
+    const tail = data.slice(midPt, searchEnd === data.length ? data.length : Math.min(searchEnd * 2, data.length));
+    const text = tail.toString('ascii');
+    const seen = new Set<string>();
+    for (const m of text.matchAll(/\b(\w{4,40})\s*=\s*(\d{8,9})\b/g)) {
+      const name = m[1], tick = parseInt(m[2]);
+      if (tick > 60000000 && tick < 70000000 && !seen.has(name)) {
+        seen.add(name);
+        rawFlags.push({ name, tick });
+      }
+    }
+  }
 
   const SKIP = new Set(['flag_date','flag_days','country','id','tick','type','none',
     'sector','planet','army','fleet','ship','pop','species_index',
     'random','graphical_culture','capital_scope','synced_random_seed']);
-
-  const rawFlags: { name: string; tick: number }[] = [];
-  for (const m of text.matchAll(/\n(\w+)\s*=\s*(\d{7,9})/g)) {
-    const name = m[1], tick = parseInt(m[2]);
-    if (SKIP.has(name) || name.length < 3 || /^\d+$/.test(name)) continue;
-    if (tick > 60000000 && tick < 70000000) rawFlags.push({ name, tick });
-  }
+  rawFlags = rawFlags.filter(f => !SKIP.has(f.name) && f.name.length >= 3 && !/^\d+$/.test(f.name));
 
   const catRules: [string, string][] = [
     ['built_','megastructure'],['started_first_','megastructure'],['finished_','megastructure'],

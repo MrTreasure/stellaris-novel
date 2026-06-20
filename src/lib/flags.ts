@@ -83,5 +83,26 @@ export function flagToTitle(flag: string): string {
   if (flag.startsWith('amoeba_')) return '🦠 太空变形虫';
   if (flag.startsWith('tiyanki_')) return '🐋 缇扬奇';
   if (flag.startsWith('drone_')) return '🤖 远古无人机';
+  if (flag.startsWith('met_fallen_empire_')) return '🏛️ 遭遇堕落帝国';
+  if (flag.startsWith('establish_')) return '📜 外交条约';
+  if (flag.startsWith('become_subject_of_')) return '🔗 成为附庸';
+  if (flag.startsWith('first_contact_completed')) return '👽 首次接触完成';
+  if (flag.startsWith('had_first_contact')) return '👽 首次外交接触';
+  if (flag.startsWith('first_special_project')) return '⚙️ 完成特殊项目';
+  if (flag.startsWith('first_trade_deal')) return '💰 首次贸易';
+  if (flag.startsWith('first_')) return '🎯 帝国里程碑';
+  if (flag.startsWith('mining_')) return '⛏️ 矿业发展';
+  if (flag.startsWith('energy_')) return '⚡ 能源储备';
+  if (flag.startsWith('food_')) return '🌾 粮食储备';
+  if (flag.startsWith('mineral_')) return '💎 矿物储备';
+  if (flag.startsWith('scientist_')) return '🔬 科学家晋升';
+  if (flag.startsWith('commander_')) return '🎖️ 指挥官晋升';
+  if (flag.startsWith('official_')) return '🏛️ 官员任命';
+  if (flag.startsWith('planet_building_')) return '🏗️ 行星建设';
+  if (flag.startsWith('factions_')) return '🏛️ 派系事件';
+  if (flag.startsWith('new_weapon_')) return '🔫 新武器研发';
+  if (flag.startsWith('start_')) return '🚀 帝国启动';
+  if (flag.startsWith('first_system_')) return '🔭 星系探索';
+  if (flag.startsWith('first_war_')) return '⚔️ 首次开战';
   return flag.replace(/_/g, ' ');
 }
