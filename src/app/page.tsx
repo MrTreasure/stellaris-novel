@@ -67,10 +67,33 @@ export default function HomePage() {
   })
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div>
+      {/* 英雄区 */}
+      <div className="relative overflow-hidden border-b border-gray-800/50">
+        <div className="absolute inset-0 z-0">
+          <img
+            src="/images/bg-space.png"
+            alt=""
+            className="w-full h-full object-cover opacity-40"
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-gray-950/60 via-gray-950/40 to-gray-950" />
+        </div>
+        <div className="relative z-10 max-w-4xl mx-auto px-4 py-16 md:py-24">
+          <div className="flex items-center gap-4 mb-6">
+            <img src="/images/logo.png" alt="Stellaris" className="h-10 md:h-14 w-auto" />
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-cyan-300 to-blue-500 bg-clip-text text-transparent">
+            银河编年史
+          </h1>
+          <p className="text-lg text-gray-400 max-w-xl">
+            上传群星存档,自动提取帝国的兴衰史,用 AI 生成属于你的银河史诗小说
+          </p>
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-4 py-8 pb-16">
       {/* 上传区 */}
       <div className="mb-10">
-        <h1 className="text-3xl font-bold mb-2">上传群星存档</h1>
         <p className="text-gray-400 mb-6">
           上传 .sav 文件,自动提取帝国数据、时间轴和里程碑事件
         </p>
@@ -176,6 +199,7 @@ export default function HomePage() {
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

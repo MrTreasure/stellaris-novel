@@ -31,8 +31,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-gray-950 text-gray-100">
         <nav className="border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm">
           <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-            <Link href="/" className="text-lg font-bold tracking-wide text-cyan-400 hover:text-cyan-300 transition-colors">
-              🌌 银河编年史
+            <Link href="/" className="flex items-center gap-3 text-lg font-bold tracking-wide text-cyan-400 hover:text-cyan-300 transition-colors">
+              <img src="/images/logo.png" alt="Stellaris" className="h-7 w-auto" />
+              <span>银河编年史</span>
             </Link>
             <div className="flex items-center gap-6 text-sm">
               <Link href="/campaigns" className="text-gray-400 hover:text-gray-200 transition-colors">
