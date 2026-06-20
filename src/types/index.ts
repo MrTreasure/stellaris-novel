@@ -114,6 +114,7 @@ export interface ParsedSave {
   key_technologies: { id: string; description: string }[];
   megastructures: { name: string; status: string }[];
   war_history: { date: string; type: string }[];
+  colonies?: { name: string; year: number }[];
 }
 
 // ===== AI 生成请求/响应 =====

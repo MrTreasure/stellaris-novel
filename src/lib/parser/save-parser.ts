@@ -104,6 +104,7 @@ export function parseSaveFile(filePath: string): ParsedSave {
   extractStats(data, searchStart, searchEnd, result);
   extractEmpireInfo(data, result);
   extractFlags(data, csPos, cePos, result);
+  extractColonies(data, result);
   extractCrises(data, result);
   extractTechnologies(data, result);
   extractMegastructures(data, result);
@@ -246,6 +247,44 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
     const year = Math.round(2200 + (rf.tick - tickBase) / 8350);
     result.timeline_events.push({ event: rf.name, category: cat(rf.name), approx_date: year.toString(), key: rf.name });
   }
+}
+
+// ===== Colony extraction =====
+
+function extractColonies(data: Buffer, result: ParsedSave) {
+  const needle = Buffer.from('colony=');
+  const limit = Math.min(10000000, data.length);
+  const colonyList: { name: string; year: number }[] = [];
+  let pos = 0;
+
+  while (pos < limit) {
+    const idx = data.indexOf(needle, pos);
+    if (idx === -1 || idx >= limit) break;
+    let end = idx + needle.length;
+    while (end < limit && data[end] >= 0x30 && data[end] <= 0x39) end++;
+    const tick = parseInt(data.slice(idx + needle.length, end).toString('ascii'));
+    if (tick > 60000000 && tick < 70000000) {
+      const before = data.slice(Math.max(0, idx - 400), idx);
+      const ni = before.lastIndexOf(Buffer.from('name="'));
+      if (ni >= 0) {
+        const ne = before.indexOf(0x22, ni + 6);
+        const nameBuf = before.slice(ni + 6, ne);
+        let name = nameBuf.toString('utf8');
+        if (/[^\x20-\x7E]/.test(name)) {
+          try { name = Buffer.from(name, 'latin1').toString('utf8'); } catch {}
+        }
+        const year = Math.round(2200 + (tick - 62800000) / 8350);
+        colonyList.push({ name, year });
+      }
+    }
+    pos = end;
+  }
+
+  // Deduplicate by name
+  const seen = new Set<string>();
+  const unique = colonyList.filter(c => !seen.has(c.name) && seen.add(c.name));
+  unique.sort((a, b) => a.year - b.year);
+  result.colonies = unique;
 }
 
 // ===== Others =====

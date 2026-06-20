@@ -82,6 +82,18 @@ export async function POST() {
               game_key: null, raw_flag: 'war', raw_value: w.date,
             });
           }
+          // Colony milestones
+          if (parsed.colonies) {
+            for (const c of parsed.colonies) {
+              milestones.push({
+                save_id: saveId, campaign_id: campaignId,
+                event_date: c.year.toString(), event_type: 'colonization',
+                title: `🌍 殖民 ${c.name}`, description: '',
+                importance: 'major', game_key: 'colony_founded', raw_flag: 'colony', raw_value: c.name,
+              });
+            }
+          }
+
           if (milestones.length > 0) insertMilestones(milestones);
           totalImported++;
         } catch (e: any) {
