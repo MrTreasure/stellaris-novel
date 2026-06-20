@@ -1,6 +1,6 @@
-// Shared flag name → Chinese title mapping
+// Shared flag name → Chinese title mapping (with optional DB enrichment)
 
-export function flagToTitle(flag: string): string {
+export function flagToTitle(flag: string, db?: any): string {
   const map: Record<string, string> = {
     first_colony: '🏗️ 建立第一个殖民地',
     colony_founded: '🌍 新殖民地',
@@ -104,5 +104,38 @@ export function flagToTitle(flag: string): string {
   if (flag.startsWith('start_')) return '🚀 帝国启动';
   if (flag.startsWith('first_system_')) return '🔭 星系探索';
   if (flag.startsWith('first_war_')) return '⚔️ 首次开战';
+
+  // DB enrichment for specific categories
+  if (db) {
+    // Anomaly: anomaly.XXX → look up Chinese name
+    const anomMatch = flag.match(/^anomaly\.(\d+)/);
+    if (anomMatch) {
+      try {
+        const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(`anomaly.${anomMatch[1]}`);
+        if (row?.zh_name) return `🔬 调查: ${row.zh_name}`;
+      } catch {}
+    }
+    // First contact: first_contact_completedXX → look up
+    const fcMatch = flag.match(/first_contact_completed(\d+)/);
+    if (fcMatch) {
+      return `👽 与 #${fcMatch[1]} 文明首次接触`;
+    }
+    // Embassy: establish_embassy_with_XX
+    const embMatch = flag.match(/establish_embassy_with_(\d+)/);
+    if (embMatch) {
+      return `🏛️ 向 #${embMatch[1]} 文明派遣大使`;
+    }
+    // Subject
+    const subjMatch = flag.match(/become_subject_of_(\d+)/);
+    if (subjMatch) {
+      return `🔗 成为 #${subjMatch[1]} 文明的附庸`;
+    }
+    // Met fallen empire
+    const feMatch = flag.match(/met_fallen_empire_(\d+)/);
+    if (feMatch) {
+      return `🏛️ 遭遇 #${feMatch[1]} 号堕落帝国`;
+    }
+  }
+
   return flag.replace(/_/g, ' ');
 }

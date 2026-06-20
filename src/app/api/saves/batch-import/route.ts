@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { flagToTitle } from '@/lib/flags';
+import { getDb } from '@/lib/db';
 
 const SAVE_DIR = 'C:/Users/Administrator/Documents/Paradox Interactive/Stellaris/save games';
 
@@ -67,15 +68,17 @@ export async function POST() {
           });
 
           // 插入里程碑 (去重: 同一战役内同类型+同年份只保留一条)
+          const db = getDb();
           const seenKeys = new Set<string>();
           const milestones: any[] = [];
           for (const evt of parsed.timeline_events) {
             const dedupKey = `${evt.category}_${evt.approx_date}`;
             if (seenKeys.has(dedupKey)) continue;
             seenKeys.add(dedupKey);
+            const title = flagToTitle(evt.event, db);
             milestones.push({
               save_id: saveId, campaign_id: campaignId, event_date: evt.approx_date,
-              event_type: evt.category, title: flagToTitle(evt.event), description: '',
+              event_type: evt.category, title, description: '',
               importance: 'major', game_key: (evt as any).key || null, raw_flag: evt.event, raw_value: null,
             });
           }
