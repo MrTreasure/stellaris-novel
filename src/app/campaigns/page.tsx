@@ -15,14 +15,27 @@ interface CampaignBrief {
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignBrief[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
-  useEffect(() => {
+  const loadCampaigns = () => {
     fetch('/api/campaigns')
       .then(r => r.json())
       .then((data: CampaignBrief[]) => setCampaigns(data))
       .catch(() => {})
       .finally(() => setLoaded(true));
-  })
+  };
+
+  useEffect(() => { loadCampaigns(); }, []);
+
+  const handleDelete = async (e: React.MouseEvent, id: number, name: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`确定要删除战役 "${name}" 吗？\n此操作不可撤销。`)) return;
+    setDeleting(id);
+    await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+    loadCampaigns();
+    setDeleting(null);
+  };
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
@@ -46,9 +59,18 @@ export default function CampaignsPage() {
                 <h3 className="text-lg font-semibold group-hover:text-cyan-400 transition-colors">
                   {c.name}
                 </h3>
-                <span className="text-xs text-gray-500">
-                  {new Date(c.created_at).toLocaleDateString('zh-CN')}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-500">
+                    {new Date(c.created_at).toLocaleDateString('zh-CN')}
+                  </span>
+                  <button
+                    onClick={(e) => handleDelete(e, c.id, c.name)}
+                    disabled={deleting === c.id}
+                    className="text-xs text-gray-600 hover:text-red-400 disabled:text-gray-800 transition-colors"
+                  >
+                    {deleting === c.id ? '删除中...' : '🗑️'}
+                  </button>
+                </div>
               </div>
               <div className="mt-2 flex gap-4 text-sm text-gray-500">
                 <span>🗂️ {c.save_count} 个存档</span>

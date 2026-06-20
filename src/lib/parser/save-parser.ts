@@ -114,7 +114,10 @@ export function parseSaveFile(filePath: string): ParsedSave {
 
   const gameDate = metaInfo['date'] || '?';
   let empireName = metaInfo['name'] || '?';
-  try { empireName = Buffer.from(empireName, 'latin1').toString('utf8'); } catch {}
+  // meta has proper UTF-8; if it's broken latin1, fix it
+  if (/[Ã©Ã¨]/.test(empireName)) {
+    try { empireName = Buffer.from(empireName, 'latin1').toString('utf8'); } catch {}
+  }
 
   // 解析结果
   const result: ParsedSave = {
@@ -332,12 +335,15 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
       const r = findKeyValue(flagsSection, flagKey);
       if (r.value !== null && typeof r.value === 'string' && r.value !== '0') {
         const tick = parseInt(r.value);
-        if (!isNaN(tick) && tick > 0) {
-          const year = 2200 + (tick / 10) / 360;
+        if (!isNaN(tick) && tick > 60000000) {
+          // PDS flag timestamp format: ~3M ticks span ~360 game years
+          // Map: tick → year using linear interpolation
+          const tickBase = 62800000;
+          const year = Math.round(2200 + (tick - tickBase) / 8350);
           result.timeline_events.push({
             event: info.title,
             category: info.category,
-            approx_date: year.toFixed(1),
+            approx_date: year.toString(),
           });
         }
       }
@@ -417,15 +423,29 @@ function extractMegastructures(data: Buffer, result: ParsedSave) {
 // ===== 战争记录 =====
 
 function extractWars(data: Buffer, searchStart: number, searchEnd: number, result: ParsedSave) {
-  for (const r of findAllValues(data, 'last_date_at_war', searchStart, searchEnd)) {
-    if (typeof r.value === 'string' && r.value !== '1.01.01') {
-      result.war_history.push({ date: r.value, type: 'war_active' });
+  // 搜索整个文件 (每个国家各有一条 war 记录,玩家帝国section内只有一条是不够的)
+  const end = Math.min(data.length, searchEnd * 2);
+  const seen = new Set<string>();
+
+  for (const r of findAllValues(data, 'last_date_at_war', 0, end)) {
+    if (typeof r.value === 'string' && r.value !== '1.01.01' && r.value !== '2200.01.01' && r.value !== '2201.01.01') {
+      const key = `${r.value}_active`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.war_history.push({ date: r.value, type: 'war_active' });
+      }
     }
   }
-  for (const r of findAllValues(data, 'last_date_war_lost', searchStart, searchEnd)) {
-    if (typeof r.value === 'string' && r.value !== '1.01.01') {
-      result.war_history.push({ date: r.value, type: 'war_lost' });
+  for (const r of findAllValues(data, 'last_date_war_lost', 0, end)) {
+    if (typeof r.value === 'string' && r.value !== '1.01.01' && r.value !== '2200.01.01') {
+      const key = `${r.value}_lost`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.war_history.push({ date: r.value, type: 'war_lost' });
+      }
     }
   }
+  // 去重 + 排序
+  result.war_history = [...new Map(result.war_history.map(w => [w.date + w.type, w])).values()];
   result.war_history.sort((a, b) => a.date.localeCompare(b.date));
 }
