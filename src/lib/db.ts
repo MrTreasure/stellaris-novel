@@ -85,9 +85,13 @@ function runMigrations(db: DatabaseSync) {
       title TEXT NOT NULL,
       status TEXT DEFAULT 'draft',
       total_chapters INTEGER DEFAULT 0,
+      background TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+
+    -- Migration: add background column if missing (SQLite 3.35+)
+    ALTER TABLE novels ADD COLUMN background TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS chapters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -319,6 +323,15 @@ export function updateNovelStatus(id: number, status: string, totalChapters?: nu
     getDb().prepare('UPDATE novels SET status = ?, updated_at = datetime(\'now\') WHERE id = ?')
       .run(status, id);
   }
+}
+
+export function updateNovelBackground(id: number, background: string) {
+  getDb().prepare('UPDATE novels SET background = ?, updated_at = datetime(\'now\') WHERE id = ?').run(background, id);
+}
+
+export function getNovelBackground(id: number): string {
+  const row = getDb().prepare('SELECT background FROM novels WHERE id = ?').get(id) as { background: string } | undefined;
+  return row?.background || '';
 }
 
 export function updateChapterContent(id: number, content: string) {
