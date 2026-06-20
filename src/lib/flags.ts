@@ -1,0 +1,87 @@
+// Shared flag name → Chinese title mapping
+
+export function flagToTitle(flag: string): string {
+  const map: Record<string, string> = {
+    first_colony: '🏗️ 建立第一个殖民地',
+    colony_founded: '🌍 新殖民地',
+    encountered_first_wormhole: '🌀 首次遭遇虫洞',
+    encountered_first_gateway: '🚪 发现远古星门',
+    encountered_first_lgate: '🌌 发现L星门',
+    encountered_first_primitive: '🦴 发现原始文明',
+    has_won_war: '⚔️ 赢得关键战争',
+    has_conquer_other_homeworld: '💀 征服异族母星',
+    built_dyson_sphere: '⭐ 戴森球建造',
+    started_first_dyson_sphere: '⭐ 戴森球启动',
+    finished_dyson_sphere: '🌟 戴森球竣工',
+    finished_think_tank: '🧠 科学枢纽竣工',
+    built_sentry_array: '🔭 哨兵阵列建成',
+    built_mega_shipyard: '🚢 巨型船坞建成',
+    built_mega_art_installation_site: '🎨 巨型艺术设施',
+    built_think_tank: '🧠 智库建成',
+    built_interstellar_assembly_site: '🏛️ 星际集会场所',
+    built_spy_orb: '🛰️ 间谍卫星',
+    archaeologist_achievement: '🏺 考古学成就达成',
+    exotic_gases_found: '💨 发现奇异气体',
+    rare_crystals_found: '💎 发现稀有水晶',
+    volatile_motes_found: '⚡ 发现挥发性微尘',
+    dark_matter_found: '🌑 发现暗物质',
+    zro_found: '✨ 发现Zro',
+    no_machine_uprising: '🤖 机械叛乱被压制',
+    first_contact_event: '👽 首次外星接触',
+    colossus_project: '☄️ 巨像计划启动',
+    fired_neutron: '⚡ 使用中子横扫',
+    fired_pacifier: '🕊️ 使用安乐天使',
+    has_market_access: '💰 加入银河市场',
+    market_nomination_eligible: '🏪 获得市场提名',
+    green_thumb_achievement: '🌿 绿色拇指成就',
+    unlimited_power_achievement: '⚡ 无限力量成就',
+    edict_masters_writings_war: '📜 战争学说令',
+    edict_renewable_energy: '🔋 可再生能源令',
+    found_presapients: '🧬 发现前智慧物种',
+    living_planet_started: '🌱 活体海洋调查开始',
+    completed_living_sea: '🌊 活体海洋完成',
+    triggered_the_oracle_digsite: '🔮 神谕考古遗址触发',
+    baol_intro: '🌿 巴奥遗族第一章',
+    last_baol_system: '🌿 巴奥遗族完成',
+    has_used_baol_lifseeding: '🌱 巴奥生命播种',
+    gate_built: '🌟 星门网络建成',
+    gateway_built: '🚪 星门建成',
+    had_comet: '☄️ 彗星事件',
+    had_uprising: '⚡ 发生起义',
+    machine_uprising_originator: '🤖 机器起义',
+    story1: '📖 先驱者故事线',
+    story2: '📖 先驱者故事线',
+    story3: '📖 先驱者故事线',
+    story4: '📖 先驱者故事线',
+    story5: '📖 先驱者故事线',
+    story6: '📖 先驱者故事线',
+    story7: '📖 先驱者故事线',
+    story8: '📖 先驱者故事线',
+  };
+
+  if (map[flag]) return map[flag];
+  // Auto-generate based on prefix
+  if (flag.startsWith('colony_')) return '🌍 殖民地事件';
+  if (flag.startsWith('surveyed_')) return `🔍 完成星域调查 (${flag.replace('surveyed_', '')})`;
+  if (flag.startsWith('encountered_')) return '👾 遭遇外星生命';
+  if (flag.startsWith('established_comms_')) return '📡 建立通讯';
+  if (flag.startsWith('anomaly_')) return '🔬 异常调查完成';
+  if (flag.startsWith('marauder_')) return '🏴‍☠️ 掠夺者事件';
+  if (flag.startsWith('triggered_')) return '📜 故事事件触发';
+  if (flag.startsWith('built_')) return '🏗️ 建造完成';
+  if (flag.startsWith('started_')) return '🔨 工程启动';
+  if (flag.startsWith('finished_')) return '✅ 工程竣工';
+  if (flag.startsWith('has_')) return '⚡ 帝国事件';
+  if (flag.startsWith('completed_')) return '✅ 任务完成';
+  if (flag.startsWith('discovered_')) return '🔭 新发现';
+  if (flag.startsWith('found_')) return '💎 发现资源';
+  if (flag.startsWith('specimens_')) return '🏺 标本收集';
+  if (flag.startsWith('cache_')) return '📦 谜团事件';
+  if (flag.startsWith('curator_')) return '🏛️ 策展人事件';
+  if (flag.startsWith('pirate_')) return '🏴‍☠️ 海盗事件';
+  if (flag.startsWith('crystal_')) return '💎 晶态实体';
+  if (flag.startsWith('amoeba_')) return '🦠 太空变形虫';
+  if (flag.startsWith('tiyanki_')) return '🐋 缇扬奇';
+  if (flag.startsWith('drone_')) return '🤖 远古无人机';
+  return flag.replace(/_/g, ' ');
+}

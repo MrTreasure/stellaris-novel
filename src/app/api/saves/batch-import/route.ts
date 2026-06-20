@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { flagToTitle } from '@/lib/flags';
 
 const SAVE_DIR = 'C:/Users/Administrator/Documents/Paradox Interactive/Stellaris/save games';
 
@@ -65,13 +66,17 @@ export async function POST() {
             raw_json: JSON.stringify(parsed),
           });
 
-          // 插入里程碑
+          // 插入里程碑 (去重: 同一战役内同类型+同年份只保留一条)
+          const seenKeys = new Set<string>();
           const milestones: any[] = [];
           for (const evt of parsed.timeline_events) {
+            const dedupKey = `${evt.category}_${evt.approx_date}`;
+            if (seenKeys.has(dedupKey)) continue;
+            seenKeys.add(dedupKey);
             milestones.push({
               save_id: saveId, campaign_id: campaignId, event_date: evt.approx_date,
-              event_type: evt.category, title: evt.event, description: '', importance: 'major',
-              game_key: (evt as any).key || null, raw_flag: (evt as any).key || null, raw_value: null,
+              event_type: evt.category, title: flagToTitle(evt.event), description: '',
+              importance: 'major', game_key: (evt as any).key || null, raw_flag: evt.event, raw_value: null,
             });
           }
           for (const w of parsed.war_history) {

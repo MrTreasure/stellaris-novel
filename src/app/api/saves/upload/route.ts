@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseSaveFile } from '@/lib/parser/save-parser';
 import { createCampaign, getCampaigns, insertSave, insertMilestones } from '@/lib/db';
+import { flagToTitle } from '@/lib/flags';
 import type { Milestone } from '@/types';
 
 export async function POST(req: NextRequest) {
@@ -51,12 +52,16 @@ export async function POST(req: NextRequest) {
     });
 
     // 插入里程碑
+    const seenKeys = new Set<string>();
     const allMilestones: Omit<Milestone, 'id'>[] = [];
     for (const evt of parsed.timeline_events) {
+      const dedupKey = `${evt.category}_${evt.approx_date}`;
+      if (seenKeys.has(dedupKey)) continue;
+      seenKeys.add(dedupKey);
       allMilestones.push({
         save_id: saveId, campaign_id: campaignId!, event_date: evt.approx_date,
-        event_type: evt.category, title: evt.event, description: '', importance: 'major',
-        game_key: (evt as any).key || null, raw_flag: (evt as any).key || null, raw_value: null,
+        event_type: evt.category, title: flagToTitle(evt.event), description: '', importance: 'major',
+        game_key: (evt as any).key || null, raw_flag: evt.event, raw_value: null,
       });
     }
     for (const w of parsed.war_history) {
