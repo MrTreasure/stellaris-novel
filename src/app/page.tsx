@@ -22,9 +22,21 @@ export default function HomePage() {
     return `/images/hero_${n}.png`;
   }, []);
 
-  useEffect(() => {
+  const [deleting, setDeleting] = useState<number | null>(null);
+
+  const loadCampaigns = () => {
     fetch('/api/campaigns').then(r => r.json()).then(setCampaigns).catch(() => {}).finally(() => setLoaded(true));
-  }, []);
+  };
+  useEffect(() => { loadCampaigns(); }, []);
+
+  const handleDelete = async (e: React.MouseEvent, id: number, name: string) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!confirm(`确定删除 "${name}"？`)) return;
+    setDeleting(id);
+    await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+    loadCampaigns();
+    setDeleting(null);
+  };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -34,7 +46,7 @@ export default function HomePage() {
     try {
       const r = await fetch('/api/saves/upload', { method: 'POST', body: fd });
       const d = await r.json();
-      if (d.error) setError(d.error); else { setResult(d); const cr = await fetch('/api/campaigns'); setCampaigns(await cr.json()); }
+      if (d.error) setError(d.error); else { setResult(d); loadCampaigns(); }
     } catch (e: any) { setError(e.message); }
     finally { setUploading(false); }
   }, []);
@@ -134,7 +146,13 @@ export default function HomePage() {
                     <span>📅 {c.date_start} ~ {c.date_end}</span>
                   </div>
                 </div>
-                <span className="text-2xl opacity-30 group-hover:opacity-100 transition-opacity">→</span>
+                <div className="flex items-center gap-3">
+                  <button onClick={(e) => handleDelete(e, c.id, c.name)} disabled={deleting === c.id}
+                    className="text-xs text-gray-700 hover:text-red-400 disabled:opacity-30 transition-colors px-1">
+                    {deleting === c.id ? '...' : '🗑️'}
+                  </button>
+                  <span className="text-2xl opacity-30 group-hover:opacity-100 transition-opacity">→</span>
+                </div>
               </Link>
             ))}
           </div>}
