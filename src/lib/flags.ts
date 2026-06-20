@@ -60,6 +60,59 @@ export function flagToTitle(flag: string, db?: any): string {
   };
 
   if (map[flag]) return map[flag];
+
+  // Corvus v4.x / Butler format - specific named flags
+  if (flag === 'cara home tradestation') return '🏠 首都贸易站建成';
+  if (flag.match(/^fc event \d+$/)) return '👽 首次接触事件';
+  if (flag === 'hostile first contact attempted') return '⚠️ 敌对首次接触';
+  if (flag === 'seen aliens') return '👽 发现外星文明';
+  if (flag.match(/^fumongus colony/)) return '🍄 真菌殖民地';
+  if (flag === 'first_alien_life') return '🦠 首次发现外星生命';
+  if (flag === 'first_intelligent_life') return '🧠 首次发现智慧生命';
+  if (flag === 'met_fallen_empire') return '🏛️ 遭遇堕落帝国';
+  if (flag === 'pirate_encountered') return '🏴‍☠️ 遭遇海盗';
+  if (flag === 'birth_of_piracy') return '🏴‍☠️ 海盗诞生';
+  if (flag === 'had_comet') return '☄️ 彗星经过';
+  if (flag === 'had_uprising') return '⚡ 发生起义';
+  if (flag === 'planet_building_built') return '🏗️ 行星建筑完成';
+  if (flag === 'mining_station_built') return '⛏️ 采矿站建成';
+  if (flag === 'has_market_access') return '💰 加入银河市场';
+  if (flag === 'has_activated_edict') return '📜 启用法令';
+  if (flag === 'has_negotiated_trade_deal') return '🤝 达成贸易协定';
+  if (flag === 'has_research_pact') return '🔬 签订科研协议';
+  if (flag === 'has_encountered_other_empire') return '👽 遭遇其他帝国';
+  if (flag === 'has_won_space_battle') return '⚔️ 赢得太空战斗';
+  if (flag === 'first_faction') return '🏛️ 首个派系成立';
+  if (flag === 'first_trade_deal') return '💰 首次贸易协定';
+  if (flag === 'first_colony_finished') return '🏗️ 殖民完成';
+  if (flag === 'first_colony_established') return '🏗️ 殖民地建立';
+  if (flag === 'first_system_survey_finished') return '🔭 首次星系调查完成';
+  if (flag === 'first_special_project_finished') return '⚙️ 首个特殊项目完成';
+  if (flag === 'first_deficit') return '⚠️ 首次资源短缺';
+  if (flag === 'first_ascension_perk') return '⬆️ 首次飞升';
+  if (flag === 'first_contact_event') return '👽 首次接触';
+  if (flag === 'new_weapon_1') return '🔫 新武器研发';
+  if (flag === 'start_resources_granted') return '🚀 初始资源分配';
+  if (flag === 'official_governor_assigned') return '🏛️ 总督任命';
+  if (flag === 'official_level_up') return '🏛️ 官员晋升';
+  if (flag === 'commander_level_up') return '🎖️ 指挥官晋升';
+  if (flag === 'scientist_level_up') return '🔬 科学家晋升';
+  if (flag === 'energy_storage_1000') return '⚡ 能源储备破千';
+  if (flag === 'food_storage_1000') return '🌾 粮食储备破千';
+  if (flag === 'mineral_storage_1000') return '💎 矿物储备破千';
+  if (flag === 'factions_political_frontier') return '🏛️ 政治边疆';
+  if (flag === 'StoryFirst') return '📖 第一章';
+  if (flag === 'StoryFirstRewardGiven') return '📖 第一章完成';
+  if (flag === 'Story5') return '📖 第五章';
+  if (flag === 'Story7') return '📖 第七章';
+  if (flag === 'ambition_launched') return '🚀 启动宏图';
+  if (flag === 'built_artificial_ship') return '🚀 建造首艘飞船';
+  if (flag === 'triggered_eye_of_the_storm') return '🌀 风暴之眼';
+  if (flag === 'triggered_aftermath_opportunists') return '📜 后续投机者';
+  if (flag === 'triggered_syndaw_505') return '🤖 合成黎明 505';
+  if (flag === 'triggered_syndaw_510') return '🤖 合成黎明 510';
+  if (flag === 'triggered_syndaw_515') return '🤖 合成黎明 515';
+
   // Auto-generate based on prefix
   if (flag.startsWith('colony_')) return '🌍 殖民地事件';
   if (flag.startsWith('surveyed_')) return `🔍 完成星域调查 (${flag.replace('surveyed_', '')})`;
