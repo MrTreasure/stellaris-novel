@@ -105,6 +105,65 @@ function runMigrations(db: DatabaseSync) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- 游戏数据: 本地化文本 (离线预加载)
+    CREATE TABLE IF NOT EXISTS game_data (
+      key TEXT PRIMARY KEY,
+      zh_name TEXT,
+      description TEXT,
+      category TEXT
+    );
+
+    -- 游戏数据: 事件脚本 (离线预加载)
+    CREATE TABLE IF NOT EXISTS game_events (
+      id TEXT PRIMARY KEY,
+      title_key TEXT,
+      desc_key TEXT,
+      options_count INTEGER DEFAULT 0,
+      raw_text TEXT,
+      file_path TEXT
+    );
+
+    -- 游戏数据: 科技树 (离线预加载)
+    CREATE TABLE IF NOT EXISTS game_techs (
+      id TEXT PRIMARY KEY,
+      tier INTEGER,
+      area TEXT,
+      category TEXT,
+      cost INTEGER,
+      start_tech INTEGER DEFAULT 0,
+      raw_text TEXT,
+      file_path TEXT
+    );
+
+    -- 游戏数据: 异常分类 (离线预加载)
+    CREATE TABLE IF NOT EXISTS game_anomalies (
+      id TEXT PRIMARY KEY,
+      level INTEGER,
+      spawn_chance TEXT,
+      outcomes TEXT,
+      raw_text TEXT,
+      file_path TEXT
+    );
+
+    -- 游戏数据: 传统树 (离线预加载)
+    CREATE TABLE IF NOT EXISTS game_traditions (
+      id TEXT PRIMARY KEY,
+      tree TEXT,
+      node_type TEXT,
+      effects TEXT,
+      raw_text TEXT,
+      file_path TEXT
+    );
+
+    -- 文件哈希追踪 (用于增量同步)
+    CREATE TABLE IF NOT EXISTS game_data_files (
+      file_path TEXT PRIMARY KEY,
+      file_hash TEXT NOT NULL,
+      data_type TEXT,
+      entry_count INTEGER DEFAULT 0,
+      updated_at TEXT
+    );
   `);
 
   // 预置默认设置
@@ -112,7 +171,6 @@ function runMigrations(db: DatabaseSync) {
     ['api_key', ''],
     ['base_url', 'https://api.deepseek.com'],
     ['model', 'deepseek-chat'],
-    ['stellaris_dir', ''],
   ];
   for (const [key, value] of defaults) {
     db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(key, value);
@@ -143,19 +201,6 @@ export function searchGameData(query: string): GameData[] {
   return getDb().prepare(
     'SELECT * FROM game_data WHERE zh_name LIKE ? OR key LIKE ? LIMIT 50'
   ).all(`%${query}%`, `%${query}%`) as GameData[];
-}
-
-export function insertGameDataBatch(rows: GameData[]) {
-  const d = getDb();
-  const stmt = d.prepare('INSERT OR REPLACE INTO game_data (key, zh_name, description, category) VALUES (?, ?, ?, ?)');
-  // 简单的逐行插入（node:sqlite 无事务API）
-  for (const item of rows) {
-    try {
-      stmt.run(item.key, item.zh_name, item.description, item.category);
-    } catch {
-      // 跳过异常行
-    }
-  }
 }
 
 export function getGameDataCount(): number {

@@ -8,13 +8,9 @@ export default function SettingsPage() {
   const [model, setModel] = useState('deepseek-chat');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState('');
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState('');
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
-  const [gameFound, setGameFound] = useState(false);
 
-  // 加载现有设置
   useEffect(() => {
     fetch('/api/settings')
       .then(r => r.json())
@@ -25,11 +21,6 @@ export default function SettingsPage() {
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
-    // 检测游戏
-    fetch('/api/import/check')
-      .then(r => r.json())
-      .then(d => setGameFound(d.found))
-      .catch(() => {});
   }, [])
 
   const saveSetting = async (key: string, value: string) => {
@@ -59,24 +50,6 @@ export default function SettingsPage() {
       setTestResult({ ok: false, message: e.message });
     } finally {
       setTesting(false);
-    }
-  };
-
-  const importGameData = async () => {
-    setImporting(true);
-    setImportResult('');
-    try {
-      const res = await fetch('/api/import', { method: 'POST' });
-      const data = await res.json();
-      if (data.error) {
-        setImportResult(`❌ ${data.error}`);
-      } else {
-        setImportResult(`✅ 导入完成,共 ${data.total} 条数据`);
-      }
-    } catch (e: any) {
-      setImportResult(`❌ ${e.message}`);
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -148,36 +121,19 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* 游戏数据 */}
+      {/* 游戏数据状态 */}
       <section className="mb-10">
         <h2 className="text-xl font-bold mb-4">🎮 游戏数据</h2>
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400">游戏版本:</span>
-            <span className="text-sm text-cyan-400 font-mono">
-              {gameFound ? '已连接' : '未检测到'}
-            </span>
-            <span className="text-xs text-gray-600">
-              (自动检测: G:\SteamLibrary\steamapps\common\Stellaris)
-            </span>
-          </div>
+        <div className="space-y-2">
           <p className="text-sm text-gray-400">
-            从群星安装目录导入本地化数据(科技/事件/异常等中文名和描述)。已导入数据可直接使用,版本升级时仅同步变更内容,不会全量重写。
+            游戏数据通过命令行离线预加载。运行 <code className="text-xs bg-gray-800 px-1.5 py-0.5 rounded text-gray-300">node scripts/preload-all.mjs</code> 同步最新数据。
           </p>
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={importGameData}
-              disabled={importing}
-              className="px-5 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              {importing ? '⏳ 同步中...' : '🔄 同步游戏数据'}
-            </button>
-            {importResult && (
-              <span className={`text-sm ${importResult.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>
-                {importResult}
-              </span>
-            )}
-          </div>
+          <p className="text-sm text-gray-400">
+            游戏升级后重新运行即可增量同步，仅更新变化的文件。
+          </p>
+          <p className="text-xs text-gray-600 mt-1">
+            数据源: G:\SteamLibrary\steamapps\common\Stellaris
+          </p>
         </div>
       </section>
     </div>
