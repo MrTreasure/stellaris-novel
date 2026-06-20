@@ -105,6 +105,11 @@ export function flagToTitle(flag: string, db?: any): string {
   if (flag.startsWith('first_system_')) return '🔭 星系探索';
   if (flag.startsWith('first_war_')) return '⚔️ 首次开战';
 
+  // Corvus v4.x short-form flags
+  if (flag.match(/^fc event \d+$/)) return `👽 首次接触事件 (${flag})`;
+  if (flag.match(/^cara home tradestation$/)) return '🏠 首都贸易站建设';
+  if (flag === 'cara' || flag.startsWith('cara ')) return '🏗️ 首都建设';
+
   // DB enrichment for specific categories
   if (db) {
     // Anomaly: anomaly.XXX → look up Chinese name

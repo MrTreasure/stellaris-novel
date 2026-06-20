@@ -83,9 +83,10 @@ export async function POST() {
             });
           }
           for (const w of parsed.war_history) {
+            if (w.date.startsWith('0.') || w.date.startsWith('1.01') || w.date === '2200.01.01') continue;
             milestones.push({
               save_id: saveId, campaign_id: campaignId, event_date: w.date,
-              event_type: 'war', title: w.type === 'war_active' ? '⚔️ 参与战争' : '💔 战败',
+              event_type: 'war', title: w.type === 'war_active' ? `⚔️ 参与战争 (${w.date})` : `💔 战败 (${w.date})`,
               description: '', importance: w.type === 'war_lost' ? 'critical' : 'major',
               game_key: null, raw_flag: 'war', raw_value: w.date,
             });
