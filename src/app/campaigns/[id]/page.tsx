@@ -4,6 +4,80 @@ import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import Chart from '@/components/StatsChart';
 
+// ===== Event Chain Helpers =====
+
+function buildLocalChains(milestones: any[]) {
+  const used = new Set<number>();
+  const chains: { id: string; name: string; category: string; events: any[] }[] = [];
+
+  function addChain(id: string, name: string, filter: (m: any) => boolean) {
+    const events = milestones.filter(m => filter(m) && !used.has(m.id));
+    if (events.length > 0) {
+      events.forEach(e => used.add(e.id));
+      chains.push({ id, name, category: '', events });
+    }
+  }
+
+  addChain('dyson', '⭐ 戴森球工程', (m: any) => m.title?.includes('戴森球') || m.raw_flag?.includes('dyson'));
+  addChain('thinktank', '🧠 科学枢纽', (m: any) => m.title?.includes('科学枢纽') || m.raw_flag?.includes('think_tank'));
+  addChain('colossus', '☄️ 巨像计划', (m: any) => m.title?.includes('巨像') || m.raw_flag?.includes('colossus'));
+  addChain('mega', '🏗️ 巨型结构', (m: any) => m.event_type === 'megastructure');
+  addChain('wars', '⚔️ 战争史', (m: any) => m.event_type === 'war');
+  addChain('crisis', '🦠 危机事件', (m: any) => m.event_type === 'crisis');
+  addChain('colony', '🌍 殖民扩张', (m: any) => m.event_type === 'colonization');
+  addChain('explore', '🔭 探索发现', (m: any) => m.event_type === 'exploration');
+  addChain('tech', '🔬 科技突破', (m: any) => m.event_type === 'technology');
+  addChain('contact', '👽 外交接触', (m: any) => m.event_type === 'diplomacy');
+
+  // 剩余未分类的
+  const rest = milestones.filter(m => !used.has(m.id));
+  if (rest.length > 0) chains.push({ id: 'other', name: '📋 其他', category: 'misc', events: rest });
+
+  return chains;
+}
+
+function ChainSection({ chain }: { chain: { id: string; name: string; events: any[] } }) {
+  const [expanded, setExpanded] = useState(false);
+  const showExpand = chain.events.length > 5;
+  const displayEvents = expanded ? chain.events : chain.events.slice(0, 5);
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm font-semibold text-gray-400">{chain.name}</span>
+        <span className="text-[10px] text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">{chain.events.length}</span>
+      </div>
+      <div className="relative pl-4 border-l border-gray-800/60 space-y-2">
+        {displayEvents.map((m, i) => (
+          <div key={m.id || i} className="relative group">
+            {/* timeline dot */}
+            <div className={`absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-gray-900 ${
+              m.importance === 'critical' ? 'bg-red-500 border-red-600' :
+              m.importance === 'major' ? 'bg-yellow-500 border-yellow-600' :
+              'bg-gray-700 border-gray-800'
+            }`} />
+            <div className="p-2.5 bg-gray-900/60 hover:bg-gray-800/60 rounded-lg transition-colors border border-gray-800/40">
+              <div className="flex items-start gap-3">
+                <span className="text-[11px] text-gray-600 font-mono shrink-0 mt-0.5 w-12">{m.event_date}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm text-gray-300">{m.title}</span>
+                  {m.loc_name && <span className="text-xs text-cyan-400/60 ml-2">{m.loc_name}</span>}
+                  {m.loc_desc && <p className="text-xs text-gray-600 mt-1 line-clamp-2">{m.loc_desc}</p>}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+        {showExpand && !expanded && (
+          <button onClick={() => setExpanded(true)} className="text-xs text-cyan-500 hover:text-cyan-400 pl-2 py-1">
+            + 展开 {chain.events.length - 5} 条...
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface CampaignDetail {
   campaign: any; saves: any[]; milestones: any[]; novels: any[];
   stats: { total_saves: number; total_milestones: number; event_types: Record<string,number>;
@@ -51,18 +125,18 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
       {/* Chart */}
       {stats.empire_evolution.length > 1 && <Chart data={stats.empire_evolution} />}
 
-      {/* Milestones */}
+      {/* Milestones with Chains */}
       <div className="mt-8 bg-gray-900/80 border border-gray-800/60 rounded-xl p-6">
-        <h2 className="text-lg font-bold text-gray-300 mb-4">📜 里程碑事件</h2>
+        <h2 className="text-lg font-bold text-gray-300 mb-4">📜 事件链与里程碑</h2>
         {milestones.length === 0 ? <p className="text-gray-600 text-sm">暂无事件</p> : (
-          <div className="space-y-1.5 max-h-80 overflow-y-auto">
-            {milestones.map((m,i) => (
-              <div key={i} className="flex gap-3 p-1.5 hover:bg-gray-800/40 rounded text-sm">
-                <span className="text-gray-600 shrink-0 w-16 text-xs font-mono">{m.event_date}</span>
-                <span className={`shrink-0 text-xs mt-0.5 ${m.importance==='critical'?'text-red-400':m.importance==='major'?'text-yellow-400':'text-gray-600'}`}>●</span>
-                <span className="text-gray-400">{m.title}</span>
-              </div>
-            ))}
+          <div className="space-y-6">
+            {(() => {
+              // Group milestones into event chains (same logic as API)
+              const chains = buildLocalChains(milestones);
+              return chains.map(chain => (
+                <ChainSection key={chain.id} chain={chain} />
+              ));
+            })()}
           </div>
         )}
       </div>

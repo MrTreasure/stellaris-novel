@@ -302,21 +302,26 @@ function extractEmpireInfo(data: Buffer, result: ParsedSave) {
 // ===== Flags 事件提取 =====
 
 function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, result: ParsedSave) {
-  const flagEvents: Record<string, { title: string; category: string }> = {
-    first_colony: { title: '🏗️ 建立第一个外星殖民地', category: 'colonization' },
-    encountered_first_wormhole: { title: '🌀 首次遭遇虫洞', category: 'exploration' },
-    has_won_war: { title: '⚔️ 赢得关键战争', category: 'war' },
-    has_conquer_other_homeworld: { title: '💀 征服异族母星', category: 'war' },
-    built_dyson_sphere: { title: '⭐ 戴森球开始建造', category: 'megastructure' },
-    started_first_dyson_sphere: { title: '⭐ 戴森球工程启动', category: 'megastructure' },
-    finished_dyson_sphere: { title: '🌟 戴森球竣工!', category: 'megastructure' },
-    finished_think_tank: { title: '🧠 科学枢纽竣工!', category: 'megastructure' },
-    archaeologist_achievement: { title: '🏺 考古学成就达成', category: 'exploration' },
-    exotic_gases_found: { title: '💨 发现奇异气体资源', category: 'exploration' },
-    no_machine_uprising: { title: '🤖 机械叛乱被成功压制', category: 'crisis' },
-    first_contact_event: { title: '👽 首次外星接触', category: 'diplomacy' },
-    encountered_first_lgate: { title: '🌌 发现L星门', category: 'exploration' },
-    colossus_project: { title: '☄️ 启动巨像计划', category: 'military' },
+  const flagEvents: Record<string, { title: string; category: string; key?: string }> = {
+    first_colony: { title: '🏗️ 建立第一个外星殖民地', category: 'colonization', key: 'first_colony' },
+    encountered_first_wormhole: { title: '🌀 首次遭遇虫洞', category: 'exploration', key: 'encountered_first_wormhole' },
+    has_won_war: { title: '⚔️ 赢得关键战争', category: 'war', key: 'has_won_war' },
+    has_conquer_other_homeworld: { title: '💀 征服异族母星', category: 'war', key: 'has_conquer_other_homeworld' },
+    built_dyson_sphere: { title: '⭐ 戴森球开始建造', category: 'megastructure', key: 'built_dyson_sphere' },
+    started_first_dyson_sphere: { title: '⭐ 戴森球工程启动', category: 'megastructure', key: 'started_first_dyson_sphere' },
+    finished_dyson_sphere: { title: '🌟 戴森球竣工!', category: 'megastructure', key: 'finished_dyson_sphere' },
+    finished_think_tank: { title: '🧠 科学枢纽竣工!', category: 'megastructure', key: 'finished_think_tank' },
+    archaeologist_achievement: { title: '🏺 考古学成就达成', category: 'exploration', key: 'archaeologist_achievement' },
+    exotic_gases_found: { title: '💨 发现奇异气体资源', category: 'exploration', key: 'exotic_gases_found' },
+    no_machine_uprising: { title: '🤖 机械叛乱被成功压制', category: 'crisis', key: 'no_machine_uprising' },
+    first_contact_event: { title: '👽 首次外星接触', category: 'diplomacy', key: 'first_contact_event' },
+    encountered_first_lgate: { title: '🌌 发现L星门', category: 'exploration', key: 'encountered_first_lgate' },
+    colossus_project: { title: '☄️ 启动巨像计划', category: 'military', key: 'colossus_project' },
+    built_sentry_array: { title: '🔭 哨兵阵列建成', category: 'megastructure', key: 'built_sentry_array' },
+    built_mega_shipyard: { title: '🚢 巨型船坞建成', category: 'megastructure', key: 'built_mega_shipyard' },
+    green_thumb_achievement: { title: '🌿 绿色拇指成就', category: 'exploration', key: 'green_thumb_achievement' },
+    unlimited_power_achievement: { title: '⚡ 无限力量成就', category: 'exploration', key: 'unlimited_power_achievement' },
+    encountered_first_gateway: { title: '🚪 发现远古星门', category: 'exploration', key: 'encountered_first_gateway' },
   };
 
   const searchTargets = csPos !== null && cePos !== null
@@ -344,6 +349,7 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
             event: info.title,
             category: info.category,
             approx_date: year.toString(),
+            key: info.key || flagKey,
           });
         }
       }

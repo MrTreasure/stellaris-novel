@@ -108,6 +108,7 @@ export interface ParsedSave {
     event: string;
     category: string;
     approx_date: string;
+    key?: string;
   }[];
   crisis_encounters: { id: string; description: string }[];
   key_technologies: { id: string; description: string }[];

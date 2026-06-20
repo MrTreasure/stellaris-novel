@@ -71,7 +71,7 @@ export async function POST() {
             milestones.push({
               save_id: saveId, campaign_id: campaignId, event_date: evt.approx_date,
               event_type: evt.category, title: evt.event, description: '', importance: 'major',
-              game_key: null, raw_flag: null, raw_value: null,
+              game_key: (evt as any).key || null, raw_flag: (evt as any).key || null, raw_value: null,
             });
           }
           for (const w of parsed.war_history) {
@@ -79,7 +79,7 @@ export async function POST() {
               save_id: saveId, campaign_id: campaignId, event_date: w.date,
               event_type: 'war', title: w.type === 'war_active' ? '⚔️ 参与战争' : '💔 战败',
               description: '', importance: w.type === 'war_lost' ? 'critical' : 'major',
-              game_key: null, raw_flag: null, raw_value: w.date,
+              game_key: null, raw_flag: 'war', raw_value: w.date,
             });
           }
           if (milestones.length > 0) insertMilestones(milestones);
