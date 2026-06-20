@@ -6,13 +6,13 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('https://api.deepseek.com');
   const [model, setModel] = useState('deepseek-chat');
-  const [stellarisDir, setStellarisDir] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState('');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState('');
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [gameFound, setGameFound] = useState(false);
 
   // 加载现有设置
   useEffect(() => {
@@ -22,10 +22,14 @@ export default function SettingsPage() {
         setApiKey(s.api_key || '');
         setBaseUrl(s.base_url || 'https://api.deepseek.com');
         setModel(s.model || 'deepseek-chat');
-        setStellarisDir(s.stellaris_dir || '');
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
+    // 检测游戏
+    fetch('/api/import/check')
+      .then(r => r.json())
+      .then(d => setGameFound(d.found))
+      .catch(() => {});
   }, [])
 
   const saveSetting = async (key: string, value: string) => {
@@ -62,11 +66,7 @@ export default function SettingsPage() {
     setImporting(true);
     setImportResult('');
     try {
-      const res = await fetch('/api/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stellaris_dir: stellarisDir }),
-      });
+      const res = await fetch('/api/import', { method: 'POST' });
       const data = await res.json();
       if (data.error) {
         setImportResult(`❌ ${data.error}`);
@@ -97,7 +97,7 @@ export default function SettingsPage() {
                 type="text"
                 value={baseUrl}
                 onChange={e => { setBaseUrl(e.target.value); saveSetting('base_url', e.target.value); }}
-                className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
+                className="flex-1 px-3 py-2 bg-gray-900 text-gray-100 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
                 placeholder="https://api.deepseek.com"
               />
               <span className="text-xs text-gray-600 self-center whitespace-nowrap">{saving === 'base_url' ? '⏳' : ''}</span>
@@ -111,7 +111,7 @@ export default function SettingsPage() {
                 type="password"
                 value={apiKey}
                 onChange={e => { setApiKey(e.target.value); saveSetting('api_key', e.target.value); }}
-                className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none font-mono"
+                className="flex-1 px-3 py-2 bg-gray-900 text-gray-100 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none font-mono"
                 placeholder="sk-..."
               />
             </div>
@@ -124,9 +124,9 @@ export default function SettingsPage() {
                 type="text"
                 value={model}
                 onChange={e => { setModel(e.target.value); saveSetting('model', e.target.value); }}
-                className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
+                className="flex-1 px-3 py-2 bg-gray-900 text-gray-100 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
                 placeholder="deepseek-chat"
-              />
+  />
             </div>
             <p className="text-xs text-gray-600 mt-1">支持所有 OpenAI 兼容模型: deepseek-chat / claude-sonnet-4-6 / gpt-4o / qwen-plus 等</p>
           </div>
@@ -135,7 +135,7 @@ export default function SettingsPage() {
             <button
               onClick={testConnection}
               disabled={testing || !apiKey}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 disabled:text-gray-700 border border-gray-700 rounded-lg text-sm transition-colors"
+              className="px-5 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
             >
               {testing ? '⏳ 测试中...' : '🔄 测试连接'}
             </button>
@@ -148,29 +148,29 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* 游戏目录设置 */}
+      {/* 游戏数据 */}
       <section className="mb-10">
-        <h2 className="text-xl font-bold mb-4">🎮 群星游戏目录</h2>
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">安装路径</label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={stellarisDir}
-              onChange={e => { setStellarisDir(e.target.value); saveSetting('stellaris_dir', e.target.value); }}
-              className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded-lg text-sm focus:border-cyan-500 focus:outline-none"
-              placeholder="C:\Program Files (x86)\Steam\steamapps\common\Stellaris"
-            />
+        <h2 className="text-xl font-bold mb-4">🎮 游戏数据</h2>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-400">游戏版本:</span>
+            <span className="text-sm text-cyan-400 font-mono">
+              {gameFound ? '已连接' : '未检测到'}
+            </span>
+            <span className="text-xs text-gray-600">
+              (自动检测: G:\SteamLibrary\steamapps\common\Stellaris)
+            </span>
           </div>
-          <p className="text-xs text-gray-600 mt-1">用于导入游戏本地化数据(科技/事件/异常等中文名和描述)</p>
-
-          <div className="mt-4 flex gap-3 items-center">
+          <p className="text-sm text-gray-400">
+            从群星安装目录导入本地化数据(科技/事件/异常等中文名和描述)。已导入数据可直接使用,版本升级时仅同步变更内容,不会全量重写。
+          </p>
+          <div className="flex gap-3 items-center">
             <button
               onClick={importGameData}
-              disabled={importing || !stellarisDir}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 disabled:text-gray-700 border border-gray-700 rounded-lg text-sm transition-colors"
+              disabled={importing}
+              className="px-5 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm font-medium transition-colors"
             >
-              {importing ? '⏳ 导入中...' : '📥 导入游戏数据'}
+              {importing ? '⏳ 同步中...' : '🔄 同步游戏数据'}
             </button>
             {importResult && (
               <span className={`text-sm ${importResult.startsWith('✅') ? 'text-green-400' : 'text-red-400'}`}>

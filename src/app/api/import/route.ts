@@ -1,18 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { importGameData } from '@/lib/parser/game-importer';
+import fs from 'fs';
+
+const COMMON_PATHS = [
+  'G:/SteamLibrary/steamapps/common/Stellaris',
+  'E:/steam/steamapps/common/Stellaris',
+  'C:/Program Files (x86)/Steam/steamapps/common/Stellaris',
+  'D:/SteamLibrary/steamapps/common/Stellaris',
+  'D:/Steam/steamapps/common/Stellaris',
+  'C:/Program Files/Steam/steamapps/common/Stellaris',
+];
+
+function findStellarisDir(): string | null {
+  for (const p of COMMON_PATHS) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    let stellarisDir = body.stellaris_dir;
+    let stellarisDir: string | null = null;
+
+    // 尝试从请求体获取
+    try {
+      const body = await req.json();
+      stellarisDir = body.stellaris_dir;
+    } catch {}
+
+    // 回退: 自动检测
+    if (!stellarisDir) {
+      stellarisDir = findStellarisDir();
+    }
 
     if (!stellarisDir) {
-      const { getSettings } = await import('@/lib/db');
-      const settings = getSettings();
-      stellarisDir = settings.stellaris_dir;
-      if (!stellarisDir) {
-        return NextResponse.json({ error: '未设置群星游戏目录' }, { status: 400 });
-      }
+      return NextResponse.json({ error: '未在本地找到群星安装目录' }, { status: 404 });
     }
 
     const result = importGameData(stellarisDir);

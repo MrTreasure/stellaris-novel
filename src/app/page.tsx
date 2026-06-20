@@ -98,6 +98,15 @@ export default function HomePage() {
           上传 .sav 文件,自动提取帝国数据、时间轴和里程碑事件
         </p>
 
+        {/* 存档目录提示 */}
+        <div className="mb-4 p-3 bg-gray-900/60 border border-gray-800 rounded-lg text-sm flex items-center gap-2">
+          <span className="text-gray-600">📂</span>
+          <span className="text-gray-500">群星存档位置:</span>
+          <code className="text-gray-400 text-xs bg-gray-800 px-2 py-0.5 rounded">
+            C:\Users\Administrator\Documents\Paradox Interactive\Stellaris\save games
+          </code>
+        </div>
+
         <div
           {...getRootProps()}
           className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all
@@ -115,6 +124,28 @@ export default function HomePage() {
               <p className="text-sm text-gray-500">或点击选择文件</p>
             </div>
           )}
+        </div>
+
+        {/* 批量导入 */}
+        <div className="mt-4 mb-6">
+          <button
+            onClick={async () => {
+              setUploading(true);
+              try {
+                const res = await fetch('/api/saves/batch-import', { method: 'POST' });
+                const data = await res.json();
+                if (data.error) setError(data.error);
+                else setError('✅ 批量导入完成: ' + data.imported + ' 个存档');
+                const cr = await fetch('/api/campaigns');
+                setCampaigns(await cr.json());
+              } catch (e: any) { setError(e.message); }
+              finally { setUploading(false); }
+            }}
+            disabled={uploading}
+            className="w-full px-4 py-2.5 border border-dashed border-gray-700 hover:border-cyan-700 text-gray-400 hover:text-cyan-400 disabled:text-gray-700 rounded-lg text-sm transition-colors"
+          >
+            {uploading ? '⏳ 处理中...' : '📂 从存档目录批量导入'}
+          </button>
         </div>
 
         {error && (
