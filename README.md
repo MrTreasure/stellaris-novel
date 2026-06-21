@@ -2,6 +2,8 @@
 
 基于《群星》(Stellaris) 游戏存档的银河史诗小说生成器。上传 `.sav` 存档 → 自动提取帝国兴衰史 → 识别事件链 → AI 创作太空歌剧小说。
 
+**在线访问**: [stellaris.mrtreasure.cc](https://stellaris.mrtreasure.cc)
+
 ## 技术栈
 
 - **Next.js 16** (App Router, TypeScript, Tailwind CSS)
