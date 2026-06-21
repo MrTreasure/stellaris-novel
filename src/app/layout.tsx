@@ -27,14 +27,14 @@ export default function RootLayout({
             src="/images/nomads-background.png"
             alt=""
             fill
-            className="object-cover opacity-20"
+            className="object-cover opacity-55"
             priority
           />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(50,201,190,0.10),transparent_38%),radial-gradient(ellipse_at_85%_30%,rgba(92,110,185,0.08),transparent_34%),linear-gradient(180deg,rgba(3,10,18,0.4),#030811_72%)]" />
-          <div className="stellar-grid absolute inset-0" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(50,201,190,0.04),transparent_40%),radial-gradient(ellipse_at_85%_30%,rgba(92,110,185,0.03),transparent_36%),linear-gradient(180deg,rgba(3,10,18,0.15),rgba(3,8,17,0.45)_60%)]" />
+          <div className="stellar-grid absolute inset-0 opacity-45" />
         </div>
         {/* Version tag */}
-        <div className="fixed bottom-3 right-4 z-50 font-mono text-[10px] tracking-[0.22em] text-[#406c70]/70 select-none pointer-events-none">
+        <div className="fixed bottom-4 right-5 z-50 font-mono text-xs tracking-[0.22em] text-[#5eb8af]/80 select-none pointer-events-none">
           Stellaris v4.4.3
         </div>
         <nav className="relative z-20 border-b border-[#376d73]/35 bg-[#030811]/88 backdrop-blur-xl">

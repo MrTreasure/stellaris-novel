@@ -7,7 +7,7 @@ import { loadAIConfig, saveAIConfig } from '@/lib/browser-storage';
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('https://api.deepseek.com');
-  const [model, setModel] = useState('deepseek-chat');
+  const [model, setModel] = useState('deepseek-v4-pro');
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -31,7 +31,9 @@ export default function SettingsPage() {
     setTesting(true); setTestResult(null);
     try {
       const r = await fetch('/api/test-ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: { api_key: apiKey, base_url: baseUrl, model } }) });
-      setTestResult(await r.json());
+      const result = await r.json();
+      setTestResult(result);
+      if (result.ok) localStorage.setItem('stellaris-novel:ai-test-passed', 'true');
     } catch (e: any) { setTestResult({ ok: false, message: e.message }); }
     finally { setTesting(false); }
   };
@@ -100,20 +102,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="panel p-5 sm:p-7">
-        <div className="flex items-center gap-3">
-          <span className="h-2 w-2 rotate-45 bg-[#7fd6a0] shadow-[0_0_10px_rgba(127,214,160,0.7)]" />
-          <div>
-            <h2 className="font-semibold text-[#d1e2e0]">数据核心状态</h2>
-            <p className="mt-1 font-mono text-[10px] tracking-[0.16em] text-[#668183]">LOCAL GAME DATABASE</p>
-          </div>
-        </div>
-        <p className="mt-5 text-sm text-[#8ea4a5]">游戏数据通过离线脚本预加载，启动前运行：</p>
-        <code className="mt-3 block border border-[#29484d] bg-[#020a11] px-4 py-3 font-mono text-xs text-[#81d2a0]">
-          node scripts/preload-all.mjs
-        </code>
-        <p className="mt-3 break-all font-mono text-[10px] leading-5 text-[#587476]">SOURCE / G:\SteamLibrary\steamapps\common\Stellaris</p>
-      </section>
     </div>
   );
 }

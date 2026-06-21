@@ -5,6 +5,23 @@ import { getDb, fileHash, detectChanges, batchInsert, batchUpdate, updateFileHas
 
 const STELLARIS = 'E:/SteamLibrary/steamapps/common/Stellaris';
 
+/** Strip unresolved game variables, resolving $var$ references recursively */
+function cleanLocValue(text, locMap) {
+  if (!text) return text;
+  let cleaned = text.replace(/\$([A-Za-z_0-9|]+)\$/g, (_match, varName) => {
+    if (locMap) {
+      const entry = locMap.get(varName.toLowerCase());
+      if (entry?.name) return entry.name;
+    }
+    return '';
+  });
+  cleaned = cleaned.replace(/\$[A-Za-z_0-9|]+\$/g, '');
+  cleaned = cleaned.replace(/\[[\w.]+\.Get\w+\]/g, '…');
+  cleaned = cleaned.replace(/\[[\w.]+\]/g, '…');
+  cleaned = cleaned.replace(/\s{2,}/g, ' ');
+  return cleaned.trim() || text;
+}
+
 function parseAllYamlFiles(locDir) {
   const result = new Map();
   for (const f of readdirSync(locDir).filter(f => f.endsWith('.yml'))) {
@@ -14,7 +31,7 @@ function parseAllYamlFiles(locDir) {
       if (!t || t.startsWith('#') || t.startsWith('l_')) continue;
       const m = t.match(/^([\w.]+):\s+"(.+)"$/) || t.match(/^([\w.]+):\d+\s+"(.+)"$/);
       if (!m) continue;
-      const rawKey = m[1].toLowerCase(), value = m[2];
+      const rawKey = m[1].toLowerCase(), value = cleanLocValue(m[2], result);
       let pk, kd;
       if (rawKey.endsWith('.desc')) { pk = rawKey.slice(0,-5); kd = 'desc'; }
       else if (rawKey.endsWith('_desc')) { pk = rawKey.slice(0,-5); kd = 'desc'; }

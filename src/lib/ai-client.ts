@@ -18,7 +18,7 @@ function resolveConfig(config?: AIClientConfig): Required<AIClientConfig> {
   return {
     apiKey: config?.apiKey || process.env.DEEPSEEK_API_KEY || '',
     baseUrl: config?.baseUrl || 'https://api.deepseek.com',
-    model: config?.model || 'deepseek-chat',
+    model: config?.model || 'deepseek-v4-pro',
   };
 }
 

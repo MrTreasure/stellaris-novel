@@ -3,10 +3,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import Link from 'next/link';
-import Image from 'next/image';
 import { ArchiveIcon, CalendarIcon, CheckIcon, ChevronRightIcon, DeleteIcon, FolderIcon, SpinnerIcon, UploadIcon } from '@/components/Icons';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { removeLocalNovel } from '@/lib/browser-storage';
+import { removeLocalNovel, loadAIConfig } from '@/lib/browser-storage';
 
 interface CampaignBrief {
   id: number; name: string; save_count: number;
@@ -60,34 +59,29 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen pb-16">
-      <section className="relative min-h-[430px] overflow-hidden border-b border-[#376d73]/25">
-        <Image src="/images/hero_20.png" alt="" fill preload sizes="100vw" className="object-cover object-center opacity-65" />
-        <div className="absolute inset-0 bg-[linear-gradient(90deg,#030811_8%,rgba(3,8,17,0.72)_45%,rgba(3,8,17,0.2)),linear-gradient(180deg,rgba(3,8,17,0.12),#030811_96%)]" />
-        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#64dfd2]/60 to-transparent" />
-        <div className="relative z-10 mx-auto flex min-h-[430px] max-w-7xl items-center px-5 py-16 sm:px-8">
-          <div className="max-w-3xl">
-            <div className="section-label mb-6">Galactic Chronicle System / 01</div>
-            <h1 className="max-w-2xl text-4xl font-light leading-[1.08] tracking-[0.08em] text-[#e7f5f3] sm:text-6xl">
-              将帝国兴衰
-              <span className="mt-2 block font-semibold text-[#7be5d9] drop-shadow-[0_0_20px_rgba(100,223,210,0.28)]">写入银河史册</span>
-            </h1>
-            <p className="mt-6 max-w-xl text-sm leading-7 text-[#9ab1b2] sm:text-base">
-              解析 Stellaris 存档中的战争、科技、外交与巨构事件，让 AI 基于真实战局生成一部专属于你的太空歌剧。
-            </p>
-            <div className="mt-8 flex flex-wrap gap-x-8 gap-y-3 text-[11px] tracking-[0.14em] text-[#698b8d]">
-              <span>PARADOX SAVE PARSER</span><span>GALACTIC TIMELINE</span><span>AI NARRATIVE CORE</span>
-            </div>
+      <section className="relative border-b border-[#376d73]/25 px-5 py-14 sm:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="section-label mb-6">Galactic Chronicle System / 01</div>
+          <h1 className="max-w-2xl text-4xl font-light leading-[1.08] tracking-[0.08em] text-[#e7f5f3] sm:text-6xl">
+            将帝国兴衰
+            <span className="mt-2 block font-semibold text-[#7be5d9] drop-shadow-[0_0_20px_rgba(100,223,210,0.28)]">写入银河史册</span>
+          </h1>
+          <p className="mt-6 max-w-xl text-sm leading-7 text-[#9ab1b2] sm:text-base">
+            解析 Stellaris 存档中的战争、科技、外交与巨构事件，让 AI 基于真实战局生成一部专属于你的太空歌剧。
+          </p>
+          <div className="mt-8 flex flex-wrap gap-x-8 gap-y-3 text-[11px] tracking-[0.14em] text-[#698b8d]">
+            <span>PARADOX SAVE PARSER</span><span>GALACTIC TIMELINE</span><span>AI NARRATIVE CORE</span>
           </div>
         </div>
       </section>
 
-      <div className="relative z-10 mx-auto -mt-12 grid max-w-7xl gap-6 px-4 sm:px-6 lg:grid-cols-[1.12fr_0.88fr]">
+      <div className="relative z-10 mx-auto grid max-w-7xl gap-6 px-4 sm:px-6 lg:grid-cols-[1.12fr_0.88fr]">
         <div className="panel flex flex-col gap-3 p-4 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
             <p className="text-sm font-semibold text-[#bcd2d0]">本地优先的创作空间</p>
             <p className="mt-1 text-xs leading-5 text-[#718d8f]">API 配置、小说章节和背景设定仅保存在当前浏览器；服务端只处理存档解析和当次 AI 生成请求。</p>
           </div>
-          <Link href="/settings" className="secondary-button shrink-0">配置本地 AI 接口 <ChevronRightIcon className="h-4 w-4" /></Link>
+          <AIBadge />
         </div>
         <section className="panel p-5 sm:p-7">
           <div className="section-label">Command Console / Save Intake</div>
@@ -179,11 +173,43 @@ export default function HomePage() {
       <ConfirmDialog
         open={Boolean(pendingDelete)}
         title="删除战役档案"
-        description={`确定删除“${pendingDelete?.name || ''}”吗？相关战役数据和当前浏览器中的小说副本都会被删除，此操作不可撤销。`}
+        description={`确定删除"${pendingDelete?.name || ''}"吗？相关战役数据和当前浏览器中的小说副本都会被删除，此操作不可撤销。`}
         busy={deleting !== null}
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
       />
     </div>
+  );
+}
+
+function AIBadge() {
+  const [status, setStatus] = useState<'loading' | 'unconfigured' | 'configured' | 'tested'>('loading');
+  useEffect(() => {
+    const cfg = loadAIConfig();
+    if (!cfg.apiKey) { setStatus('unconfigured'); return; }
+    const lastTest = localStorage.getItem('stellaris-novel:ai-test-passed');
+    if (lastTest === 'true') { setStatus('tested'); return; }
+    setStatus('configured');
+  }, []);
+  if (status === 'loading') return null;
+  if (status === 'unconfigured') {
+    return (
+      <Link href="/settings" className="secondary-button shrink-0">
+        配置本地 AI 接口 <ChevronRightIcon className="h-4 w-4" />
+      </Link>
+    );
+  }
+  if (status === 'configured') {
+    return (
+      <Link href="/settings" className="secondary-button shrink-0">
+        验证 AI 连接 <ChevronRightIcon className="h-4 w-4" />
+      </Link>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded border border-[#4a8d5a]/50 bg-[#1a3a22]/60 px-2.5 py-1 text-[11px] font-semibold tracking-wider text-[#7fd6a0]">
+      <span className="h-1.5 w-1.5 rounded-full bg-[#7fd6a0] shadow-[0_0_6px_rgba(127,214,160,0.7)]" />
+      AI 连接正常
+    </span>
   );
 }

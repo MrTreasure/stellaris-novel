@@ -292,6 +292,15 @@ export function getCampaign(id: number): Campaign | undefined {
   return getDb().prepare('SELECT * FROM campaigns WHERE id = ?').get(id) as Campaign | undefined;
 }
 
+/** Update campaign date range when new saves are added */
+export function updateCampaignDates(campaignId: number, newDate: string) {
+  const c = getCampaign(campaignId);
+  if (!c) return;
+  const start = !c.date_start || c.date_start > newDate ? newDate : c.date_start;
+  const end = !c.date_end || c.date_end < newDate ? newDate : c.date_end;
+  getDb().prepare('UPDATE campaigns SET date_start = ?, date_end = ? WHERE id = ?').run(start, end, campaignId);
+}
+
 export function createCampaign(name: string, sourceDir: string, dateStart: string, dateEnd: string): number {
   const r = getDb().prepare(
     'INSERT INTO campaigns (name, source_dir, date_start, date_end) VALUES (?, ?, ?, ?)'

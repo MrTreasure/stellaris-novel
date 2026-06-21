@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { parseSaveFile } from '@/lib/parser/save-parser';
-import { createCampaign, getCampaigns, insertSave, insertMilestones, getDb } from '@/lib/db';
+import { createCampaign, getCampaigns, insertSave, insertMilestones, updateCampaignDates, getDb } from '@/lib/db';
 import { flagToTitle } from '@/lib/flags';
 import type { Milestone } from '@/types';
 
@@ -88,12 +88,22 @@ export async function POST(req: NextRequest) {
       active_wars: parsed.wars_detailed?.active || null,
     });
 
+    // 更新战役日期范围
+    updateCampaignDates(campaignId!, parsed.game_date);
+
+    // 查询已有里程碑做跨存档去重
+    const db = getDb();
+    const existingKeys = new Set(
+      (db.prepare('SELECT event_date, raw_flag FROM milestones WHERE campaign_id = ?').all(campaignId!) as { event_date: string; raw_flag: string | null }[])
+        .map(r => `${r.raw_flag || ''}_${r.event_date}`)
+    );
+
     // 插入里程碑
     const seenKeys = new Set<string>();
     const allMilestones: Omit<Milestone, 'id'>[] = [];
     for (const evt of parsed.timeline_events) {
       const dedupKey = `${evt.event}_${evt.approx_date}`;
-      if (seenKeys.has(dedupKey)) continue;
+      if (seenKeys.has(dedupKey) || existingKeys.has(dedupKey)) continue;
       seenKeys.add(dedupKey);
       allMilestones.push({
         save_id: saveId, campaign_id: campaignId!, event_date: evt.approx_date,
@@ -119,9 +129,12 @@ export async function POST(req: NextRequest) {
         });
       }
     }
-    // Enriched milestones — fleet & population
+    // Enriched milestones — fleet & population (with cross-save dedup)
     if (parsed.fleets?.notable) {
       for (const f of parsed.fleets.notable.slice(0, 5)) {
+        const dk = `fleet_${f.name}`;
+        if (seenKeys.has(dk) || existingKeys.has(dk)) continue;
+        seenKeys.add(dk);
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
           event_type: 'military', title: `🚢 舰队: ${localizeValue(f.name)} (${f.ships}舰, 战力${f.power.toLocaleString()})`,
@@ -132,6 +145,9 @@ export async function POST(req: NextRequest) {
     // Enriched milestones — leaders
     if (parsed.leaders?.top) {
       for (const l of parsed.leaders.top) {
+        const dk = `leader_${l.name}`;
+        if (seenKeys.has(dk) || existingKeys.has(dk)) continue;
+        seenKeys.add(dk);
         const classLabel: Record<string, string> = { scientist: '科学家', admiral: '提督', general: '将军', governor: '总督', ruler: '统治者', official: '官员', commander: '指挥官' };
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
@@ -144,6 +160,9 @@ export async function POST(req: NextRequest) {
     // Enriched milestones — archaeology
     if (parsed.archaeology?.sites) {
       for (const a of parsed.archaeology.sites) {
+        const dk = `archaeology_${a.name}`;
+        if (seenKeys.has(dk) || existingKeys.has(dk)) continue;
+        seenKeys.add(dk);
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
           event_type: 'exploration', title: `🏺 考古: ${localizeValue(a.name)} (阶段${a.stage}/${a.total_stages})`,
@@ -154,6 +173,9 @@ export async function POST(req: NextRequest) {
     // Enriched milestones — situations
     if (parsed.situations?.list) {
       for (const s of parsed.situations.list) {
+        const dk = `situation_${s.type}`;
+        if (seenKeys.has(dk) || existingKeys.has(dk)) continue;
+        seenKeys.add(dk);
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
           event_type: 'event', title: `📋 局势: ${localizeValue(s.type)}${s.progress ? ` (${s.progress}%)` : ''}`,
@@ -163,18 +185,26 @@ export async function POST(req: NextRequest) {
     }
     // Enriched milestones — diplomacy
     if (parsed.diplomacy?.federation_name) {
-      allMilestones.push({
-        save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
-        event_type: 'diplomacy', title: `🤝 联邦: ${parsed.diplomacy.federation_name} (${parsed.diplomacy.federation_size || '?'}成员)`,
-        description: '', importance: 'critical', game_key: 'federation', raw_flag: 'federation', raw_value: parsed.diplomacy.federation_name,
-      });
+      const dk = `federation_${parsed.diplomacy.federation_name}`;
+      if (!seenKeys.has(dk) && !existingKeys.has(dk)) {
+        seenKeys.add(dk);
+        allMilestones.push({
+          save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+          event_type: 'diplomacy', title: `🤝 联邦: ${parsed.diplomacy.federation_name} (${parsed.diplomacy.federation_size || '?'}成员)`,
+          description: '', importance: 'critical', game_key: 'federation', raw_flag: 'federation', raw_value: parsed.diplomacy.federation_name,
+        });
+      }
     }
     if (parsed.diplomacy?.gc_member) {
-      allMilestones.push({
-        save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
-        event_type: 'diplomacy', title: '🌐 星海共同体成员', description: `贸易协定: ${parsed.diplomacy.trade_deals}, 附庸: ${parsed.diplomacy.subjects}`,
-        importance: 'major', game_key: 'galactic_community', raw_flag: 'galactic_community', raw_value: null,
-      });
+      const dk = 'galactic_community_member';
+      if (!seenKeys.has(dk) && !existingKeys.has(dk)) {
+        seenKeys.add(dk);
+        allMilestones.push({
+          save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+          event_type: 'diplomacy', title: '🌐 星海共同体成员', description: `贸易协定: ${parsed.diplomacy.trade_deals}, 附庸: ${parsed.diplomacy.subjects}`,
+          importance: 'major', game_key: 'galactic_community', raw_flag: 'galactic_community', raw_value: null,
+        });
+      }
     }
     if (allMilestones.length > 0) insertMilestones(allMilestones);
 

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useRef } from 'react';
 import Link from 'next/link';
 import Chart from '@/components/StatsChart';
-import { AlertIcon, ArchiveIcon, BookIcon, CalendarIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, SpinnerIcon, SparkIcon } from '@/components/Icons';
+import { AlertIcon, ArchiveIcon, BookIcon, CalendarIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, SpinnerIcon, SparkIcon, UploadIcon } from '@/components/Icons';
 import { loadLocalNovel, LocalNovel } from '@/lib/browser-storage';
 
 export default function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
@@ -12,11 +12,30 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
   const [localNovel, setLocalNovel] = useState<LocalNovel | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [updateMsg, setUpdateMsg] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const reloadData = () => {
+    fetch(`/api/campaigns/${id}`).then(r => r.json()).then(setData).catch(e => setError(e.message));
+  };
 
   useEffect(() => {
-    fetch(`/api/campaigns/${id}`).then(r => r.json()).then(setData).catch(e => setError(e.message)).finally(() => setLoaded(true));
+    reloadData();
     loadLocalNovel(parseInt(id)).then(setLocalNovel);
   }, [id]);
+
+  const handleUpdateSave = async (file: File) => {
+    setUploading(true); setUpdateMsg(''); setError('');
+    const fd = new FormData(); fd.append('file', file); fd.append('campaign_name', data?.campaign?.name || '');
+    try {
+      const r = await fetch('/api/saves/upload', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.error) setError(d.error);
+      else { setUpdateMsg(`已更新存档: ${d.parsed?.game_date}`); reloadData(); }
+    } catch (e: any) { setError(e.message); }
+    finally { setUploading(false); }
+  };
 
   if (!loaded) return <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-12 text-[#607c7e]"><SpinnerIcon className="spin h-4 w-4" />正在载入战役档案...</div>;
   if (error) return <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-12 text-[#e49b91]"><AlertIcon className="h-5 w-5" />{error}</div>;
@@ -35,6 +54,18 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
         <span className="flex items-center gap-2"><ArchiveIcon className="h-4 w-4 text-[#5eb8af]" />{stats.total_saves} 存档</span>
         <span className="flex items-center gap-2"><SparkIcon className="h-4 w-4 text-[#5eb8af]" />{stats.total_milestones} 里程碑</span>
         <span className="flex items-center gap-2"><CalendarIcon className="h-4 w-4 text-[#5eb8af]" />{campaign.date_start} — {campaign.date_end}</span>
+      </div>
+
+      {/* Upload update save */}
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <input ref={fileRef} type="file" accept=".sav" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleUpdateSave(f); e.target.value = ''; }} />
+        <button onClick={() => fileRef.current?.click()} disabled={uploading}
+          className="secondary-button">
+          {uploading ? <><SpinnerIcon className="spin h-4 w-4" />解析中</> : <><UploadIcon className="h-4 w-4" />更新存档</>}
+        </button>
+        {updateMsg && <span className="flex items-center gap-1.5 text-[13px] text-[#7fd6a0]"><CheckIcon className="h-4 w-4" />{updateMsg}</span>}
+        <span className="text-[11px] text-[#5d797b]">上传同一战役的新存档，自动合并里程碑并保留已有小说</span>
       </div>
 
       <div className="my-8 grid grid-cols-2 gap-3 sm:grid-cols-4">

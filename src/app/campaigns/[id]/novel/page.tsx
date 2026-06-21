@@ -439,7 +439,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
               <button onClick={() => setShowPromptPreview(false)} className="secondary-button shrink-0">关闭</button>
             </div>
             <textarea readOnly value={promptPreview}
-              className="field mt-4 flex-1 min-h-[550px] resize-none font-mono text-xs leading-5" />
+              className="field mt-4 flex-1 min-h-[750px] resize-none font-mono text-xs leading-5" />
             <div className="mt-4 flex justify-end gap-3">
               <button onClick={() => navigator.clipboard.writeText(promptPreview)} className="secondary-button">复制到剪贴板</button>
               <button onClick={() => setShowPromptPreview(false)} className="primary-button">关闭</button>

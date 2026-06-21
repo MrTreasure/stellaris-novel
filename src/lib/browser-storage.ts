@@ -63,7 +63,7 @@ export const emptyContinuity: ContinuityBible = {
 export const defaultAIConfig: LocalAIConfig = {
   apiKey: '',
   baseUrl: 'https://api.deepseek.com',
-  model: 'deepseek-chat',
+  model: 'deepseek-v4-pro',
 };
 
 export function novelStorageKey(campaignId: number) {

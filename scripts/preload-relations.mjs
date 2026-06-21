@@ -13,6 +13,28 @@ const STELLARIS = 'E:/SteamLibrary/steamapps/common/Stellaris';
 
 // ===== Helpers =====
 
+/** Strip unresolved game variables from localisation text, resolving $var$ references recursively */
+function cleanLocalisationValue(text, locMap) {
+  if (!text) return text;
+  // Resolve $variable$ references by looking them up in the localization map
+  let cleaned = text.replace(/\$([A-Za-z_0-9|]+)\$/g, (_match, varName) => {
+    if (locMap) {
+      const entry = locMap.get(varName.toLowerCase());
+      if (entry?.name) return entry.name;
+    }
+    return '';
+  });
+  // Remove remaining unresolved $var$ patterns
+  cleaned = cleaned.replace(/\$[A-Za-z_0-9|]+\$/g, '');
+  // Remove bracketed script references like [Root.GetName], [From.Planet.GetName]
+  cleaned = cleaned.replace(/\[[\w.]+\.Get\w+\]/g, '…');
+  cleaned = cleaned.replace(/\[[\w.]+\]/g, '…');
+  // Remove consecutive spaces
+  cleaned = cleaned.replace(/\s{2,}/g, ' ');
+  cleaned = cleaned.replace(/[_\s]+$/, '');
+  return cleaned.trim() || text;
+}
+
 function loadLocalisation() {
   const locDir = join(STELLARIS, 'localisation/simp_chinese');
   if (!existsSync(locDir)) return new Map();
@@ -32,17 +54,51 @@ function loadLocalisation() {
       else if (rawKey.endsWith('_title')) pk = rawKey.slice(0, -6);
       else pk = rawKey;
 
+      const clean = cleanLocalisationValue(m[2], map);
       const entry = map.get(pk);
       if (entry) {
-        if (rawKey.endsWith('desc') || rawKey.endsWith('_desc')) entry.desc = m[2];
-        else entry.name = m[2];
+        if (rawKey.endsWith('desc') || rawKey.endsWith('_desc')) entry.desc = clean;
+        else entry.name = clean;
       } else {
         const isDesc = rawKey.endsWith('desc') || rawKey.endsWith('_desc');
-        map.set(pk, { name: isDesc ? '' : m[2], desc: isDesc ? m[2] : '' });
+        map.set(pk, { name: isDesc ? '' : clean, desc: isDesc ? m[2] : '' });
       }
     }
   }
+  // Second pass: resolve any remaining $var$ references now that all entries are loaded
+  for (const [key, entry] of map) {
+    if (entry.name && /\$[\w.]+\$/.test(entry.name)) {
+      entry.name = resolveVariables(entry.name, map);
+    }
+    if (entry.desc && /\$[\w.]+\$/.test(entry.desc)) {
+      entry.desc = resolveVariables(entry.desc, map);
+    }
+  }
+
   return map;
+}
+
+/** Iteratively resolve all $var$ references until stable (up to 5 passes) */
+function resolveVariables(text, locMap) {
+  let result = text;
+  for (let pass = 0; pass < 5; pass++) {
+    const prev = result;
+    result = result.replace(/\$([\w.]+)\$/g, (_match, varName) => {
+      let entry = locMap.get(varName.toLowerCase());
+      // Try suffix-stripped keys
+      if (!entry) {
+        for (const suffix of ['_title', '_name', '_desc', '_chain']) {
+          if (varName.endsWith(suffix)) {
+            entry = locMap.get(varName.slice(0, -suffix.length).toLowerCase());
+            if (entry) break;
+          }
+        }
+      }
+      return entry?.name || '';
+    });
+    if (result === prev) break;
+  }
+  return result.trim() || text;
 }
 
 function localName(loc, key) {
@@ -453,15 +509,17 @@ export function syncRelations(db, { changed, isFirst }) {
   const prefixGroups = buildChainGroups(edges);
   for (const [prefix, eventIds] of prefixGroups) {
     if (eventIds.length < 2) continue;
+    // Clean trailing underscores from auto-generated chain IDs
+    const cleanId = prefix.replace(/_+$/, '');
     // Skip if already covered by native chains
-    if (chains.some(c => c.chain_id === prefix)) continue;
+    if (chains.some(c => c.chain_id === cleanId || c.chain_id === prefix)) continue;
 
-    const category = guessChainCategory(prefix);
-    const zhLabel = localName(loc, prefix) || prefix;
+    const category = guessChainCategory(cleanId);
+    const zhLabel = localName(loc, cleanId) || localName(loc, prefix) || cleanId.replace(/_/g, ' ').trim();
 
     chains.push({
-      chain_id: prefix,
-      name_key: prefix,
+      chain_id: cleanId,
+      name_key: cleanId,
       zh_name: zhLabel,
       category,
       root_node_id: null,
