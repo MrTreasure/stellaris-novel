@@ -2,9 +2,42 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { parseSaveFile } from '@/lib/parser/save-parser';
-import { createCampaign, getCampaigns, insertSave, insertMilestones } from '@/lib/db';
+import { createCampaign, getCampaigns, insertSave, insertMilestones, getDb } from '@/lib/db';
 import { flagToTitle } from '@/lib/flags';
 import type { Milestone } from '@/types';
+
+/** Look up a key in game_data, fall back to humanized key */
+function localizeValue(key: string): string {
+  if (!key) return '';
+  try {
+    const db = getDb();
+    // Try exact match
+    const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(key.toLowerCase()) as { zh_name?: string } | undefined;
+    if (row?.zh_name) return row.zh_name;
+    // Try removing common suffixes
+    for (const suffix of ['_site', '_dig', '_chain', '_category', '_project']) {
+      if (key.endsWith(suffix)) {
+        const baseKey = key.slice(0, -suffix.length);
+        const r2 = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(baseKey.toLowerCase()) as { zh_name?: string } | undefined;
+        if (r2?.zh_name) return r2.zh_name;
+      }
+    }
+  } catch {}
+  // Humanize: strip known prefixes and format
+  return humanizeKey(key);
+}
+
+function humanizeKey(key: string): string {
+  if (key === '%SEQ%') return '序列舰队';
+  return key
+    .replace(/_/g, ' ')
+    .replace(/^site /i, '')
+    .replace(/^shipclass /i, '')
+    .replace(/ CHR /gi, ' ')
+    .replace(/\b\w+_[A-Z]+\d+_/g, '')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase()) || key;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -91,7 +124,7 @@ export async function POST(req: NextRequest) {
       for (const f of parsed.fleets.notable.slice(0, 5)) {
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
-          event_type: 'military', title: `🚢 舰队: ${f.name} (${f.ships}舰, 战力${f.power.toLocaleString()})`,
+          event_type: 'military', title: `🚢 舰队: ${localizeValue(f.name)} (${f.ships}舰, 战力${f.power.toLocaleString()})`,
           description: '', importance: 'major', game_key: 'fleet', raw_flag: 'fleet', raw_value: f.name,
         });
       }
@@ -102,7 +135,7 @@ export async function POST(req: NextRequest) {
         const classLabel: Record<string, string> = { scientist: '科学家', admiral: '提督', general: '将军', governor: '总督', ruler: '统治者', official: '官员', commander: '指挥官' };
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
-          event_type: 'leader', title: `⭐ ${classLabel[l.class] || l.class}: ${l.name} (${l.level}级)`,
+          event_type: 'leader', title: `⭐ ${classLabel[l.class] || l.class}: ${localizeValue(l.name)} (${l.level}级)`,
           description: l.traits.join(', '), importance: l.level >= 8 ? 'critical' : 'major',
           game_key: 'leader', raw_flag: `leader_${l.class}`, raw_value: l.name,
         });
@@ -113,7 +146,7 @@ export async function POST(req: NextRequest) {
       for (const a of parsed.archaeology.sites) {
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
-          event_type: 'exploration', title: `🏺 考古: ${a.name} (阶段${a.stage}/${a.total_stages})`,
+          event_type: 'exploration', title: `🏺 考古: ${localizeValue(a.name)} (阶段${a.stage}/${a.total_stages})`,
           description: '', importance: 'major', game_key: 'archaeology', raw_flag: 'archaeology', raw_value: a.name,
         });
       }
@@ -123,7 +156,7 @@ export async function POST(req: NextRequest) {
       for (const s of parsed.situations.list) {
         allMilestones.push({
           save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
-          event_type: 'event', title: `📋 局势: ${s.type}${s.progress ? ` (${s.progress}%)` : ''}`,
+          event_type: 'event', title: `📋 局势: ${localizeValue(s.type)}${s.progress ? ` (${s.progress}%)` : ''}`,
           description: s.target || '', importance: 'major', game_key: 'situation', raw_flag: s.type, raw_value: s.target || null,
         });
       }

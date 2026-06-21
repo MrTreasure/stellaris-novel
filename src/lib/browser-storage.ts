@@ -1,3 +1,6 @@
+// Browser storage layer — IndexedDB via idb-keyval (async, 数百MB+ capacity)
+import { get, set, del } from 'idb-keyval';
+
 export const AI_CONFIG_KEY = 'stellaris-novel:ai-config';
 
 export interface LocalAIConfig {
@@ -27,11 +30,18 @@ export interface ContinuityBible {
   timelineState: string;
 }
 
+export type NovelMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string }
+  | { role: 'tool'; content: string; tool_call_id: string; tool_name: string };
+
 export interface LocalNovel {
   campaignId: number;
   title: string;
   background: string;
   backgroundEnabled: boolean;
+  messages: NovelMessage[];
   chapters: LocalChapter[];
   continuity: ContinuityBible;
   updatedAt: string;
@@ -60,6 +70,7 @@ export function novelStorageKey(campaignId: number) {
   return `stellaris-novel:novel:${campaignId}`;
 }
 
+// AI config stays in localStorage (small, needs to be synchronous for settings page)
 export function loadAIConfig(): LocalAIConfig {
   try {
     const value = localStorage.getItem(AI_CONFIG_KEY);
@@ -73,25 +84,26 @@ export function saveAIConfig(config: LocalAIConfig) {
   localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(config));
 }
 
-export function loadLocalNovel(campaignId: number): LocalNovel | null {
+// Novel data in IndexedDB
+export async function loadLocalNovel(campaignId: number): Promise<LocalNovel | null> {
   try {
-    const value = localStorage.getItem(novelStorageKey(campaignId));
-    if (!value) return null;
-    const parsed = JSON.parse(value) as LocalNovel;
+    const parsed = await get<LocalNovel>(novelStorageKey(campaignId));
+    if (!parsed) return null;
     return {
       ...parsed,
       continuity: parsed.continuity || emptyContinuity,
-      chapters: (parsed.chapters || []).map(chapter => ({ ...chapter, summary: chapter.summary || '' })),
+      messages: parsed.messages || [],
+      chapters: (parsed.chapters || []).map(c => ({ ...c, summary: c.summary || '' })),
     };
   } catch {
     return null;
   }
 }
 
-export function saveLocalNovel(novel: LocalNovel) {
-  localStorage.setItem(novelStorageKey(novel.campaignId), JSON.stringify(novel));
+export async function saveLocalNovel(novel: LocalNovel) {
+  await set(novelStorageKey(novel.campaignId), novel);
 }
 
-export function removeLocalNovel(campaignId: number) {
-  localStorage.removeItem(novelStorageKey(campaignId));
+export async function removeLocalNovel(campaignId: number) {
+  await del(novelStorageKey(campaignId));
 }

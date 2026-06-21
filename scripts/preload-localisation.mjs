@@ -19,6 +19,7 @@ function parseAllYamlFiles(locDir) {
       if (rawKey.endsWith('.desc')) { pk = rawKey.slice(0,-5); kd = 'desc'; }
       else if (rawKey.endsWith('_desc')) { pk = rawKey.slice(0,-5); kd = 'desc'; }
       else if (rawKey.endsWith('_name')) { pk = rawKey.slice(0,-5); kd = 'name'; }
+      else if (rawKey.endsWith('_title')) { pk = rawKey.slice(0,-6); kd = 'name'; }
       else { pk = rawKey; kd = 'name'; }
       const e = result.get(pk);
       if (e) { e[kd] = value; } else { result.set(pk, { name: kd==='name'?value:'', desc: kd==='desc'?value:'' }); }

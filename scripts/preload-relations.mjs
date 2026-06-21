@@ -29,6 +29,7 @@ function loadLocalisation() {
       let pk;
       if (rawKey.endsWith('.desc') || rawKey.endsWith('_desc')) pk = rawKey.replace(/\.(desc)$/, '').replace(/_(desc)$/, '');
       else if (rawKey.endsWith('_name')) pk = rawKey.slice(0, -5);
+      else if (rawKey.endsWith('_title')) pk = rawKey.slice(0, -6);
       else pk = rawKey;
 
       const entry = map.get(pk);
@@ -46,13 +47,32 @@ function loadLocalisation() {
 
 function localName(loc, key) {
   if (!key) return '';
-  const entry = loc.get(key.toLowerCase());
+  const k = key.toLowerCase();
+  let entry = loc.get(k);
+  // Also try stripping common suffixes if direct lookup fails
+  if (!entry) {
+    for (const suffix of ['_title', '_name', '_desc']) {
+      if (k.endsWith(suffix)) {
+        entry = loc.get(k.slice(0, -suffix.length));
+        if (entry) break;
+      }
+    }
+  }
   return entry?.name || entry?.desc || '';
 }
 
 function localDesc(loc, key) {
   if (!key) return '';
-  const entry = loc.get(key.toLowerCase());
+  const k = key.toLowerCase();
+  let entry = loc.get(k);
+  if (!entry) {
+    for (const suffix of ['_desc', '_title', '_name']) {
+      if (k.endsWith(suffix)) {
+        entry = loc.get(k.slice(0, -suffix.length));
+        if (entry) break;
+      }
+    }
+  }
   return entry?.desc || entry?.name || '';
 }
 
@@ -414,10 +434,11 @@ export function syncRelations(db, { changed, isFirst }) {
         const icon = asString(val.icon);
         const category = asString(val.situation_log_category) || guessChainCategory(key);
 
+        const zhTitle = localName(loc, `${key}_title`) || localName(loc, `event_chain_${key}_title`) || key;
         chains.push({
           chain_id: key,
-          name_key: `event_chain_${key}_title`,
-          zh_name: localName(loc, `event_chain_${key}_title`) || key,
+          name_key: `${key}_title`,
+          zh_name: zhTitle,
           category,
           root_node_id: null,
           source: 'native',

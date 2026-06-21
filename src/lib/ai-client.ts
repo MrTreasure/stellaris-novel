@@ -1,10 +1,17 @@
-// AI 客户端 — OpenAI 兼容 API
-// 支持任意 baseUrl / model / apiKey，配置由每次前端请求显式提供。
+// AI client — Vercel AI SDK v6 with OpenAI-compatible provider (DeepSeek)
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { streamText, generateText, type ToolSet } from 'ai';
 
 export interface AIClientConfig {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
 }
 
 function resolveConfig(config?: AIClientConfig): Required<AIClientConfig> {
@@ -15,112 +22,83 @@ function resolveConfig(config?: AIClientConfig): Required<AIClientConfig> {
   };
 }
 
+function buildModel(config?: AIClientConfig) {
+  const cfg = resolveConfig(config);
+  const provider = createOpenAICompatible({
+    name: 'deepseek',
+    baseURL: cfg.baseUrl.replace(/\/$/, ''),
+    apiKey: cfg.apiKey,
+  });
+  return { model: provider.chatModel(cfg.model), config: cfg };
+}
+
+export interface StreamEvent {
+  type: 'text';
+  content: string;
+}
+
+export interface StreamResult {
+  usage: TokenUsage;
+}
+
+/** Stream a chat completion with optional tools. AI SDK handles the tool call loop automatically. */
 export async function* streamChat(
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
-  config?: AIClientConfig
-): AsyncGenerator<string> {
-  const cfg = resolveConfig(config);
-  const url = `${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
+  config?: AIClientConfig,
+  options?: { tools?: ToolSet },
+): AsyncGenerator<StreamEvent, StreamResult> {
+  const { model } = buildModel(config);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${cfg.apiKey}`,
+  let usage: TokenUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
+
+  const result = streamText({
+    model,
+    messages: messages as any,
+    tools: options?.tools,
+    temperature: 0.8,
+    maxOutputTokens: 4096,
+    onFinish: (event) => {
+      usage = {
+        inputTokens: event.usage?.inputTokens ?? 0,
+        cachedInputTokens: event.usage?.cachedInputTokens ?? 0,
+        outputTokens: event.usage?.outputTokens ?? 0,
+      };
     },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages,
-      stream: true,
-      temperature: 0.8,
-      max_tokens: 4096,
-    }),
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`AI API 错误 (${response.status}): ${errText}`);
+  for await (const chunk of result.textStream) {
+    yield { type: 'text', content: chunk };
   }
 
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed === 'data: [DONE]') continue;
-      if (!trimmed.startsWith('data: ')) continue;
-
-      try {
-        const json = JSON.parse(trimmed.slice(6));
-        const content = json.choices?.[0]?.delta?.content || '';
-        if (content) yield content;
-      } catch {
-        // 跳过解析失败的行
-      }
-    }
-  }
+  return { usage };
 }
 
-export async function testConnection(config?: AIClientConfig): Promise<{ ok: boolean; message: string }> {
-  try {
-    const cfg = resolveConfig(config);
-    const url = `${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`;
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${cfg.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [
-          { role: 'user', content: '回答"连接成功"四个字即可' }
-        ],
-        stream: false,
-        max_tokens: 10,
-      }),
-    });
-
-    if (!response.ok) {
-      return { ok: false, message: `API 返回 ${response.status}` };
-    }
-    return { ok: true, message: '连接成功' };
-  } catch (e: any) {
-    return { ok: false, message: e.message || '连接失败' };
-  }
-}
-
+/** Non-streaming chat completion for structured output (continuity extraction). */
 export async function completeChat(
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
   config?: AIClientConfig,
 ): Promise<string> {
-  const cfg = resolveConfig(config);
-  const response = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${cfg.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages,
-      stream: false,
-      temperature: 0.2,
-      max_tokens: 1400,
-      response_format: { type: 'json_object' },
-    }),
+  const { model } = buildModel(config);
+  const result = await generateText({
+    model,
+    messages: messages as any,
+    temperature: 0.2,
+    maxOutputTokens: 1400,
   });
-  if (!response.ok) throw new Error(`概要生成失败 (${response.status})`);
-  const payload = await response.json();
-  return payload.choices?.[0]?.message?.content || '';
+  return result.text;
+}
+
+/** Test API connection */
+export async function testConnection(config?: AIClientConfig): Promise<{ ok: boolean; message: string }> {
+  try {
+    const { model } = buildModel(config);
+    const result = await generateText({
+      model,
+      messages: [{ role: 'user', content: '回答"连接成功"四个字即可' }],
+      maxOutputTokens: 10,
+    });
+    return { ok: true, message: result.text || '连接成功' };
+  } catch (e: any) {
+    return { ok: false, message: e.message || '连接失败' };
+  }
 }

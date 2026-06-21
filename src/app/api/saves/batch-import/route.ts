@@ -4,6 +4,23 @@ import path from 'path';
 import { flagToTitle } from '@/lib/flags';
 import { getDb } from '@/lib/db';
 
+function localizeValue(key: string): string {
+  if (!key) return '';
+  try {
+    const db = getDb();
+    const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(key.toLowerCase()) as { zh_name?: string } | undefined;
+    if (row?.zh_name) return row.zh_name;
+    for (const suffix of ['_site', '_dig', '_chain', '_category', '_project']) {
+      if (key.endsWith(suffix)) {
+        const r2 = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(key.slice(0, -suffix.length).toLowerCase()) as { zh_name?: string } | undefined;
+        if (r2?.zh_name) return r2.zh_name;
+      }
+    }
+  } catch {}
+  if (key === '%SEQ%') return '序列舰队';
+  return key.replace(/_/g, ' ').replace(/ CHR /gi, ' ').trim().replace(/\b\w/g, c => c.toUpperCase()) || key;
+}
+
 const SAVE_DIR = 'C:/Users/Administrator/Documents/Paradox Interactive/Stellaris/save games';
 
 export async function POST() {
@@ -117,18 +134,18 @@ export async function POST() {
           // Enriched milestones
           if (parsed.fleets?.notable) {
             for (const f of parsed.fleets.notable.slice(0, 5)) {
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'military', title: `🚢 舰队: ${f.name} (${f.ships}舰)`, description: '', importance: 'major', game_key: 'fleet', raw_flag: 'fleet', raw_value: f.name });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'military', title: `🚢 舰队: ${localizeValue(f.name)} (${f.ships}舰)`, description: '', importance: 'major', game_key: 'fleet', raw_flag: 'fleet', raw_value: f.name });
             }
           }
           if (parsed.leaders?.top) {
             for (const l of parsed.leaders.top) {
               const cl: Record<string, string> = { scientist: '科学家', admiral: '提督', general: '将军', governor: '总督', ruler: '统治者', official: '官员', commander: '指挥官' };
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'leader', title: `⭐ ${cl[l.class] || l.class}: ${l.name} (${l.level}级)`, description: l.traits.join(', '), importance: l.level >= 8 ? 'critical' : 'major', game_key: 'leader', raw_flag: `leader_${l.class}`, raw_value: l.name });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'leader', title: `⭐ ${cl[l.class] || l.class}: ${localizeValue(l.name)} (${l.level}级)`, description: l.traits.join(', '), importance: l.level >= 8 ? 'critical' : 'major', game_key: 'leader', raw_flag: `leader_${l.class}`, raw_value: l.name });
             }
           }
           if (parsed.archaeology?.sites) {
             for (const a of parsed.archaeology.sites) {
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'exploration', title: `🏺 考古: ${a.name} (阶段${a.stage}/${a.total_stages})`, description: '', importance: 'major', game_key: 'archaeology', raw_flag: 'archaeology', raw_value: a.name });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'exploration', title: `🏺 考古: ${localizeValue(a.name)} (阶段${a.stage}/${a.total_stages})`, description: '', importance: 'major', game_key: 'archaeology', raw_flag: 'archaeology', raw_value: a.name });
             }
           }
           if (parsed.situations?.list) {

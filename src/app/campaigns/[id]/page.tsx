@@ -15,7 +15,7 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
 
   useEffect(() => {
     fetch(`/api/campaigns/${id}`).then(r => r.json()).then(setData).catch(e => setError(e.message)).finally(() => setLoaded(true));
-    setLocalNovel(loadLocalNovel(parseInt(id)));
+    loadLocalNovel(parseInt(id)).then(setLocalNovel);
   }, [id]);
 
   if (!loaded) return <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-12 text-[#607c7e]"><SpinnerIcon className="spin h-4 w-4" />正在载入战役档案...</div>;
