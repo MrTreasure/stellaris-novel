@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-codex/
 /out/
 
 # production
@@ -45,3 +46,4 @@ yarn-error.log*
 next-env.d.ts
 /data/*.db-shm
 /data/*.db-wal
+.next-codex/

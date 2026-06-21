@@ -1,12 +1,12 @@
 import { NextRequest } from 'next/server';
-import { getCampaign, getSaves, getMilestones, createNovel, insertChapter, updateNovelStatus, getNovel, getChapters, updateChapterContent, getNovelBackground } from '@/lib/db';
-import { streamChat } from '@/lib/ai-client';
-import { getSettings } from '@/lib/db';
+import { getCampaign, getSaves, getMilestones } from '@/lib/db';
+import { completeChat, streamChat } from '@/lib/ai-client';
+import type { ContinuityBible } from '@/lib/browser-storage';
 import { loadLore } from '@/lib/lore';
 
 export const dynamic = 'force-dynamic';
 
-function buildPrompt(campaignId: number, novelId?: number): { system: string; intro: string } {
+function buildPrompt(campaignId: number): { system: string; intro: string } {
   const campaign = getCampaign(campaignId);
   const saves = getSaves(campaignId);
   const milestones = getMilestones(campaignId);
@@ -36,6 +36,7 @@ function buildPrompt(campaignId: number, novelId?: number): { system: string; in
   const events = keyMilestones.length > 50
     ? keyMilestones.map(m => `[${m.event_date}] ${m.title}`).join('\n')
     : milestones.map(m => `[${m.event_date}] ${m.title}`).join('\n');
+  const eventChains = buildEventChains(milestones);
 
   const ethicsStr = empireInfo.ethics ? empireInfo.ethics.join('、') : '未知';
   const civicsStr = empireInfo.civics ? empireInfo.civics.join('、') : '未知';
@@ -53,6 +54,9 @@ function buildPrompt(campaignId: number, novelId?: number): { system: string; in
 4. 每章2500-3500字，结构完整（开端-发展-高潮-收尾）
 5. 使用规范中文，避免翻译腔
 6. 时间跨度过大时用"数十年转瞬即逝"等自然过渡
+7. 严格延续连续性档案中的人物状态、势力关系、既定事实与未解决伏笔
+8. 新章节应自然承接最近一章的结尾，避免重复介绍已经登场的人物和设定
+9. 除非本章明确推动或解决，不得遗忘、篡改或无故终止既有伏笔
 
 【群星世界观参考】
 ${loreText}`;
@@ -76,7 +80,11 @@ ${evolution.map(e => `- ${e.date}: 规模${e.size}, 军力${e.military?.toLocale
 
 ## 重大事件时间轴
 
-${events}`;
+${events}
+
+## 已识别事件链
+
+${eventChains || '暂无可识别的多阶段事件链。'}`;
 
   return { system, intro };
 }
@@ -89,65 +97,35 @@ function safeJsonParse(s: string | null): string[] {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { campaign_id, novel_id, chapter_index, mode, chapter_id, instructions } = body;
+    const { campaign_id, chapter_index, mode, chapter_number, instructions, background, chapters = [], continuity, config } = body;
 
     if (!campaign_id) return new Response('需要 campaign_id', { status: 400 });
+    if (!config?.apiKey) return new Response('请先在系统设置中配置 API Key', { status: 400 });
+    if (!getCampaign(campaign_id)) return new Response('战役不存在', { status: 400 });
 
-    let currentNovelId = novel_id;
-    let currentChapterIndex = chapter_index || 1;
+    const currentChapterIndex = mode === 'rewrite' ? chapter_number : (chapter_index || 1);
+    const { system, intro } = buildPrompt(campaign_id);
+    const finalIntro = background ? `## 额外背景设定\n${background}\n\n${intro}` : intro;
+    const existingChapters = chapters.filter((c: { chapter_number: number }) => c.chapter_number < currentChapterIndex);
+    const latestPrevious = existingChapters.at(-1);
+    const summaries = existingChapters
+      .map((chapter: { chapter_number: number; summary?: string }) => `- 第${chapter.chapter_number}章：${chapter.summary || '暂无概要'}`)
+      .join('\n');
+    const context = existingChapters.length > 0 ? `## 长篇连续性档案
+${formatContinuity(continuity)}
 
-    if (!currentNovelId) {
-      const campaign = getCampaign(campaign_id);
-      if (!campaign) return new Response('战役不存在', { status: 400 });
-      currentNovelId = createNovel(campaign_id, `${campaign.name}史诗`);
-      updateNovelStatus(currentNovelId, 'generating');
-    }
+## 历史章节概要
+${summaries}
 
-    const novel = getNovel(currentNovelId);
-    if (!novel) return new Response('小说不存在', { status: 400 });
-
-    const { system, intro } = buildPrompt(campaign_id, currentNovelId);
-
-    let finalIntro = intro;
-    if (currentNovelId) {
-      const bg = getNovelBackground(currentNovelId);
-      if (bg) finalIntro = `## 额外背景设定\n${bg}\n\n${intro}`;
-    }
-
-    const chapters = getChapters(currentNovelId);
-    const existingChapters = chapters.filter(c => c.chapter_number < currentChapterIndex);
-    let context = '';
-    if (existingChapters.length > 0) {
-      context = '## 已有章节\n' + existingChapters.map(c =>
-        `### 第${c.chapter_number}章 ${c.title}\n${c.content.slice(0, 500)}...`
-      ).join('\n\n');
-    }
+## 最近一章完整正文
+${latestPrevious?.content || ''}` : '';
 
     let userPrompt = `${finalIntro}\n\n${context}`;
-    let chapterTitle = '';
-    let chId: number | null = null;
 
-    if (mode === 'rewrite' && chapter_id) {
-      const ch = chapters.find(c => c.id === chapter_id);
+    if (mode === 'rewrite' && chapter_number) {
+      const ch = chapters.find((c: { chapter_number: number }) => c.chapter_number === chapter_number);
       if (!ch) return new Response('章节不存在', { status: 400 });
-      chId = chapter_id;
-      currentChapterIndex = ch.chapter_number;
-      chapterTitle = `第${ch.chapter_number}章(重写版)`;
-      userPrompt = `${finalIntro}\n\n## 需要重写的章节\n### 第${ch.chapter_number}章 ${ch.title}\n${ch.content}\n\n## 修改要求\n${instructions || '请重新撰写这章，使其更加精彩'}`;
-    } else {
-      chapterTitle = `第${currentChapterIndex}章`;
-    }
-
-    if (!chId) {
-      chId = insertChapter({
-        novel_id: currentNovelId,
-        chapter_number: currentChapterIndex,
-        title: chapterTitle,
-        content: '',
-        era_start: '',
-        era_end: '',
-        source_milestones: JSON.stringify([]),
-      });
+      userPrompt = `${finalIntro}\n\n${context}\n\n## 需要重写的章节\n### 第${ch.chapter_number}章 ${ch.title}\n${ch.content}\n\n## 修改要求\n${instructions || '请重新撰写这章，使其更加精彩'}`;
     }
 
     const task = mode === 'rewrite'
@@ -164,19 +142,18 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          for await (const chunk of streamChat(messages)) {
+          for await (const chunk of streamChat(messages, config)) {
             fullContent += chunk;
             controller.enqueue(encoder.encode(JSON.stringify({ type: 'chunk', content: chunk }) + '\n'));
           }
 
-          updateChapterContent(chId, fullContent);
-          updateNovelStatus(currentNovelId, 'draft', Math.max(currentChapterIndex, novel.total_chapters));
-
+          const memory = await extractChapterMemory(fullContent, continuity, config);
           controller.enqueue(encoder.encode(JSON.stringify({
             type: 'done',
-            chapter_id: chId,
             chapter_number: currentChapterIndex,
             mode: mode || 'new',
+            summary: memory.summary,
+            continuity: memory.continuity,
           }) + '\n'));
           controller.close();
         } catch (e: any) {
@@ -192,4 +169,88 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     return new Response(e.message, { status: 500 });
   }
+}
+
+function formatContinuity(continuity?: ContinuityBible): string {
+  if (!continuity) return '暂无连续性档案。';
+  return [
+    `当前时间与局势：${continuity.timelineState || '未记录'}`,
+    `人物：${continuity.characters?.join('；') || '未记录'}`,
+    `势力：${continuity.factions?.join('；') || '未记录'}`,
+    `既定事实：${continuity.establishedFacts?.join('；') || '未记录'}`,
+    `未解决伏笔：${continuity.unresolvedThreads?.join('；') || '未记录'}`,
+    `进行中的游戏事件链：${continuity.activeEventChains?.join('；') || '未记录'}`,
+  ].join('\n');
+}
+
+async function extractChapterMemory(content: string, previous: ContinuityBible | undefined, config: { apiKey: string; baseUrl: string; model: string }) {
+  const fallback = {
+    summary: content.slice(0, 300),
+      continuity: previous || { characters: [], factions: [], unresolvedThreads: [], activeEventChains: [], establishedFacts: [], timelineState: '' },
+  };
+  try {
+    const response = await completeChat([
+      {
+        role: 'system',
+        content: '你是长篇小说连续性编辑。只输出 JSON，不要添加 Markdown。保留仍然有效的旧信息，删除已解决的伏笔。',
+      },
+      {
+        role: 'user',
+        content: `旧连续性档案：\n${JSON.stringify(previous || {})}\n\n新章节：\n${content}\n\n输出结构：{"summary":"200-350字章节概要","continuity":{"characters":["人物及当前状态"],"factions":["势力及关系"],"unresolvedThreads":["尚未解决的伏笔"],"activeEventChains":["仍在推进、尚未完结的群星事件链及当前阶段"],"establishedFacts":["不可违背的既定事实"],"timelineState":"章节结束时的时间和总体局势"}}`,
+      },
+    ], config);
+    const parsed = JSON.parse(response);
+    return {
+      summary: typeof parsed.summary === 'string' ? parsed.summary : fallback.summary,
+      continuity: {
+        characters: parsed.continuity?.characters || [],
+        factions: parsed.continuity?.factions || [],
+        unresolvedThreads: parsed.continuity?.unresolvedThreads || [],
+        activeEventChains: parsed.continuity?.activeEventChains || [],
+        establishedFacts: parsed.continuity?.establishedFacts || [],
+        timelineState: parsed.continuity?.timelineState || '',
+      },
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function buildEventChains(milestones: { event_date: string; title: string; raw_flag: string | null }[]): string {
+  const groups = new Map<string, { label: string; events: string[] }>();
+  for (const milestone of milestones) {
+    const chain = identifyEventChain(milestone.raw_flag || '', milestone.title);
+    if (!chain) continue;
+    const group = groups.get(chain.id) || { label: chain.label, events: [] };
+    group.events.push(`[${milestone.event_date}] ${milestone.title}`);
+    groups.set(chain.id, group);
+  }
+  return [...groups.values()]
+    .filter(group => group.events.length >= 2)
+    .map(group => `### ${group.label}\n${group.events.map(event => `- ${event}`).join('\n')}`)
+    .join('\n\n');
+}
+
+function identifyEventChain(flag: string, title: string): { id: string; label: string } | null {
+  const source = `${flag} ${title}`.toLowerCase();
+  const known: [RegExp, string, string][] = [
+    [/yuht/, 'precursor-yuht', '尤特先驱者事件链'],
+    [/vultaum/, 'precursor-vultaum', '沃陶姆先驱者事件链'],
+    [/first_league|第一联盟/, 'precursor-first-league', '第一联盟先驱者事件链'],
+    [/irassian|伊拉斯/, 'precursor-irassian', '伊拉斯协约国先驱者事件链'],
+    [/cybrex|赛博勒克斯/, 'precursor-cybrex', '赛博勒克斯先驱者事件链'],
+    [/baol|巴奥/, 'precursor-baol', '巴奥先驱者事件链'],
+    [/zroni|泽珞/, 'precursor-zroni', '泽珞先驱者事件链'],
+    [/rubricator|遗珍线索/, 'rubricator', '碎片整理者事件链'],
+    [/great_khan|horde|大可汗/, 'great-khan', '大可汗事件链'],
+    [/galactic_community|galcom|银河共同体/, 'galactic-community', '银河共同体事件链'],
+    [/galactic_market|银河市场/, 'galactic-market', '银河市场事件链'],
+    [/first_contact|fc_event|首次接触/, 'first-contact', '首次接触事件链'],
+    [/storm|风暴/, 'cosmic-storm', '宇宙风暴事件链'],
+    [/synth_queen|机械女皇/, 'synth-queen', '机械女皇事件链'],
+  ];
+  for (const [pattern, id, label] of known) {
+    if (pattern.test(source)) return { id, label };
+  }
+  return null;
 }

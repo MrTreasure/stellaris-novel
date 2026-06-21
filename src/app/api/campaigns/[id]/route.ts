@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCampaign, getSaves, getMilestones, getChapters, getNovels } from '@/lib/db';
 import { getDb } from '@/lib/db';
+import { localizeMilestoneTitle } from '@/lib/flags';
 
 export async function GET(
   _req: NextRequest,
@@ -14,9 +15,11 @@ export async function GET(
   if (!campaign) return NextResponse.json({ error: '战役不存在' }, { status: 404 });
 
   const saves = getSaves(campaignId);
-  const milestones = getMilestones(campaignId);
-  const novels = getNovels(campaignId);
-
+  const db = getDb();
+  const milestones = getMilestones(campaignId).map(milestone => ({
+    ...milestone,
+    title: localizeMilestoneTitle(milestone.raw_flag, milestone.title, db),
+  }));
   const eventTypes: Record<string, number> = {};
   for (const m of milestones) {
     eventTypes[m.event_type] = (eventTypes[m.event_type] || 0) + 1;
@@ -26,7 +29,6 @@ export async function GET(
     campaign,
     saves,
     milestones,
-    novels,
     stats: {
       total_saves: saves.length,
       total_milestones: milestones.length,

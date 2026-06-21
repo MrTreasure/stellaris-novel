@@ -113,7 +113,15 @@ export interface ParsedSave {
   crisis_encounters: { id: string; description: string }[];
   key_technologies: { id: string; description: string }[];
   megastructures: { name: string; status: string }[];
-  war_history: { date: string; type: string }[];
+  war_history: {
+    date: string;
+    type: string;
+    role?: 'attacker' | 'defender';
+    attacker?: string;
+    defender?: string;
+    opponent?: string;
+    war_goal?: string;
+  }[];
   colonies?: { name: string; year: number }[];
 }
 

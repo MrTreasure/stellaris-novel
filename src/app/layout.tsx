@@ -1,17 +1,8 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import Image from "next/image";
+import { ArchiveIcon, SettingsIcon } from "@/components/Icons";
 
 export const metadata: Metadata = {
   title: "银河编年史 - 群星小说生成器",
@@ -26,28 +17,40 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
+      className="h-full antialiased dark"
       style={{ colorScheme: 'dark' }}
     >
-      <body className="min-h-full flex flex-col bg-gray-950 text-gray-100">
-        {/* 全局背景 */}
-        <div className="fixed inset-0 z-0 pointer-events-none">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(8,145,178,0.08),transparent_60%)]" />
-          <div className="absolute inset-0 bg-[url('/images/bg-space.png')] bg-cover bg-center opacity-10" />
+      <body className="min-h-full flex flex-col">
+        <a href="#main-content" className="skip-link">跳至主要内容</a>
+        <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden" aria-hidden="true">
+          <div className="space-background absolute inset-0 opacity-25" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(50,201,190,0.14),transparent_38%),radial-gradient(ellipse_at_85%_30%,rgba(92,110,185,0.12),transparent_34%),linear-gradient(180deg,rgba(3,10,18,0.3),#030811_72%)]" />
+          <div className="stellar-grid absolute inset-0" />
         </div>
-        <nav className="relative z-20 border-b border-cyan-800/20 bg-gray-950/80 backdrop-blur-xl">
-          <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-3">
-              <img src="/images/logo.png" alt="Stellaris" className="h-6 w-auto drop-shadow-[0_0_8px_rgba(34,211,238,0.3)]" />
-              <span className="text-base font-bold tracking-wider text-transparent bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text">银河编年史</span>
+        <nav className="relative z-20 border-b border-[#376d73]/35 bg-[#030811]/88 backdrop-blur-xl">
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+            <Link href="/" className="group flex min-h-11 items-center gap-3">
+              <span className="relative flex h-9 w-9 items-center justify-center border border-[#58c6bb]/45 bg-[#071722]/80 [clip-path:polygon(18%_0,100%_0,100%_82%,82%_100%,0_100%,0_18%)]">
+                <Image src="/images/logo.png" alt="" width={30} height={30} className="h-6 w-auto object-contain opacity-90 transition group-hover:drop-shadow-[0_0_8px_rgba(97,223,206,0.65)]" />
+              </span>
+              <span>
+                <span className="block text-sm font-semibold tracking-[0.18em] text-[#d9f3ef]">银河编年史</span>
+                <span className="hidden text-[9px] tracking-[0.28em] text-[#65979a] sm:block">STELLARIS ARCHIVE</span>
+              </span>
             </Link>
-            <div className="flex items-center gap-6 text-sm font-medium">
-              <Link href="/campaigns" className="text-gray-400 hover:text-cyan-300 transition-colors">战役列表</Link>
-              <Link href="/settings" className="text-gray-400 hover:text-cyan-300 transition-colors">设置</Link>
+            <div className="flex items-center gap-1 text-sm font-medium">
+              <Link href="/campaigns" className="nav-link">
+                <ArchiveIcon className="h-4 w-4" />
+                <span>战役档案</span>
+              </Link>
+              <Link href="/settings" className="nav-link">
+                <SettingsIcon className="h-4 w-4" />
+                <span>系统设置</span>
+              </Link>
             </div>
           </div>
         </nav>
-        <main className="relative z-10 flex-1">
+        <main id="main-content" className="relative z-10 flex-1">
           {children}
         </main>
       </body>

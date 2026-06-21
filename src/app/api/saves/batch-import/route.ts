@@ -43,6 +43,10 @@ export async function POST() {
       } else {
         campaignId = createCampaign(empireName, campaignDir, saveFiles[0], saveFiles[saveFiles.length - 1]);
       }
+      const knownWars = new Set(
+        (getDb().prepare("SELECT event_date, raw_value FROM milestones WHERE campaign_id = ? AND event_type = 'war'").all(campaignId) as { event_date: string; raw_value: string }[])
+          .map(row => `${row.event_date}:${row.raw_value}`),
+      );
 
       for (const sf of saveFiles) {
         const savePath = path.join(fullPath, sf);
@@ -72,7 +76,7 @@ export async function POST() {
           const seenKeys = new Set<string>();
           const milestones: any[] = [];
           for (const evt of parsed.timeline_events) {
-            const dedupKey = `${evt.category}_${evt.approx_date}`;
+            const dedupKey = `${evt.event}_${evt.approx_date}`;
             if (seenKeys.has(dedupKey)) continue;
             seenKeys.add(dedupKey);
             const title = flagToTitle(evt.event, db);
@@ -84,11 +88,15 @@ export async function POST() {
           }
           for (const w of parsed.war_history) {
             if (w.date.startsWith('0.') || w.date.startsWith('1.01') || w.date === '2200.01.01') continue;
+            const rawWar = JSON.stringify(w);
+            const warKey = `${w.date}:${rawWar}`;
+            if (knownWars.has(warKey)) continue;
+            knownWars.add(warKey);
             milestones.push({
               save_id: saveId, campaign_id: campaignId, event_date: w.date,
-              event_type: 'war', title: w.type === 'war_active' ? `⚔️ 参与战争 (${w.date})` : `💔 战败 (${w.date})`,
+              event_type: 'war', title: formatWarTitle(w),
               description: '', importance: w.type === 'war_lost' ? 'critical' : 'major',
-              game_key: null, raw_flag: 'war', raw_value: w.date,
+              game_key: null, raw_flag: 'war', raw_value: rawWar,
             });
           }
           // Colony milestones
@@ -115,4 +123,12 @@ export async function POST() {
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
+}
+
+function formatWarTitle(war: { type: string; role?: string; opponent?: string; war_goal?: string }) {
+  const action = war.type === 'war_lost' ? '战败于' : war.role === 'attacker' ? '向' : '遭到';
+  const ending = war.type === 'war_lost' ? '' : '宣战';
+  const opponent = war.opponent || '未知帝国';
+  const goal = war.war_goal ? `，战争目标：${war.war_goal}` : '';
+  return `${action}${opponent}${ending}${goal}`;
 }

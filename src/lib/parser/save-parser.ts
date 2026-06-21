@@ -97,7 +97,7 @@ export function parseSaveFile(filePath: string): ParsedSave {
     key_technologies: [], megastructures: [], war_history: [],
   };
 
-  const { csPos, cePos } = findPlayerCountry(data);
+  const { csPos, cePos, playerCountryId } = findPlayerCountry(data);
   const searchStart = csPos ?? 0;
   const searchEnd = cePos ?? data.length;
 
@@ -108,14 +108,14 @@ export function parseSaveFile(filePath: string): ParsedSave {
   extractCrises(data, result);
   extractTechnologies(data, result);
   extractMegastructures(data, result);
-  extractWars(data, searchStart, searchEnd, result);
+  extractWars(data, playerCountryId, result);
 
   return result;
 }
 
 // ===== 国家 section 定位 =====
 
-function findPlayerCountry(data: Buffer): { csPos: number | null; cePos: number | null } {
+function findPlayerCountry(data: Buffer): { csPos: number | null; cePos: number | null; playerCountryId: string } {
   const playerPos = data.indexOf(Buffer.from('player={'));
   let playerCountryId = '0';
   if (playerPos >= 0) {
@@ -125,36 +125,30 @@ function findPlayerCountry(data: Buffer): { csPos: number | null; cePos: number 
   }
   // Search for country section - PDS format varies by version
   let countrySec = data.indexOf(Buffer.from('\ncountry={'));
+  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\ncountry=\n{'));
   if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\r\ncountry={'));
   if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\tcountry={'));
   if (countrySec < 0) countrySec = data.indexOf(Buffer.from('country={'));  // anywhere
   if (countrySec < 0) {
     // Corvus 4.2.x and newer: country data may be in a different structure
     // Fall back to searching the entire file for player country section
-    return findPlayerCountryByScan(data, playerCountryId);
+    return { ...findPlayerCountryByScan(data, playerCountryId), playerCountryId };
   }
-  if (countrySec < 0) return { csPos: null, cePos: null };
+  if (countrySec < 0) return { csPos: null, cePos: null, playerCountryId };
   const cbs = data.indexOf(Buffer.from('{'), countrySec + 8);
-  if (cbs < 0) return { csPos: null, cePos: null };
+  if (cbs < 0) return { csPos: null, cePos: null, playerCountryId };
   const cbe = findBlockEnd(data, cbs + 1);
 
-  const cidBytes = Buffer.from(playerCountryId + '={');
-  let pos = countrySec;
-  while (pos < cbe) {
-    const idx = data.indexOf(cidBytes, pos);
-    if (idx === -1 || idx >= cbe) break;
-    if (idx > 0 && !Buffer.from(' \t\n\r').includes(data[idx - 1])) { pos = idx + cidBytes.length; continue; }
-    const bp = idx + cidBytes.length - 2;
-    const ss = data.indexOf(Buffer.from('{'), bp);
-    if (ss < 0) break;
+  const countryText = data.subarray(cbs + 1, cbe - 1).toString('latin1');
+  const playerPattern = new RegExp(`(?:^|\\n)\\s*${playerCountryId}=\\s*\\{`);
+  const match = playerPattern.exec(countryText);
+  if (match) {
+    const relativeBrace = match.index + match[0].lastIndexOf('{');
+    const ss = cbs + 1 + relativeBrace;
     const se = findBlockEnd(data, ss + 1);
-    const check = data.subarray(idx, se).toString('ascii');
-    if (check.includes('graphical_culture') || (check.includes('flags={') && check.includes('tech_status'))) {
-      return { csPos: idx, cePos: se };
-    }
-    pos = se;
+    return { csPos: cbs + 1 + match.index, cePos: se, playerCountryId };
   }
-  return { csPos: null, cePos: null };
+  return { csPos: null, cePos: null, playerCountryId };
 }
 
 function findPlayerCountryByScan(data: Buffer, playerId: string): { csPos: number | null; cePos: number | null } {
@@ -343,19 +337,96 @@ function extractMegastructures(data: Buffer, result: ParsedSave) {
   for (const [flag,info] of Object.entries(m)) { if (data.includes(Buffer.from(flag))) result.megastructures.push(info); }
 }
 
-function extractWars(data: Buffer, searchStart: number, searchEnd: number, result: ParsedSave) {
-  const end = Math.min(data.length, searchEnd * 2);
+function extractWars(data: Buffer, playerCountryId: string, result: ParsedSave) {
+  const countryNames = extractCountryNames(data, playerCountryId, result.empire_name);
+  const timelineSource = data.toString('latin1');
   const seen = new Set<string>();
-  for (const r of findAllValues(data, 'last_date_at_war', 0, end)) {
-    if (typeof r.value === 'string' && !['1.01.01','2200.01.01','2201.01.01'].includes(r.value)) {
-      const k = `${r.value}_war`; if (!seen.has(k)) { seen.add(k); result.war_history.push({ date: r.value, type: 'war_active' }); }
-    }
+  const definitionPattern = /definition="timeline_(?:first_)?war_declared_(attacker|defender)"/g;
+
+  for (const match of timelineSource.matchAll(definitionPattern)) {
+    const before = timelineSource.slice(Math.max(0, (match.index || 0) - 600), match.index);
+    const dates = [...before.matchAll(/date=\s*"([^"]+)"/g)];
+    const dataBlocks = [...before.matchAll(/data=\s*\{\s*([0-9\s]+)\}/g)];
+    const date = dates.at(-1)?.[1];
+    const ids = dataBlocks.at(-1)?.[1].trim().split(/\s+/).filter(Boolean);
+    if (!date || !ids || ids.length < 2) continue;
+
+    const attackerId = ids[0];
+    const defenderId = ids[1];
+    if (attackerId !== playerCountryId && defenderId !== playerCountryId) continue;
+    const role = attackerId === playerCountryId ? 'attacker' : 'defender';
+    const opponentId = role === 'attacker' ? defenderId : attackerId;
+    const key = `${date}_${attackerId}_${defenderId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    result.war_history.push({
+      date,
+      type: 'war_active',
+      role,
+      attacker: countryNames.get(attackerId) || `帝国 #${attackerId}`,
+      defender: countryNames.get(defenderId) || `帝国 #${defenderId}`,
+      opponent: countryNames.get(opponentId) || `帝国 #${opponentId}`,
+    });
   }
-  for (const r of findAllValues(data, 'last_date_war_lost', 0, end)) {
-    if (typeof r.value === 'string' && !['1.01.01','2200.01.01'].includes(r.value)) {
-      const k = `${r.value}_lost`; if (!seen.has(k)) { seen.add(k); result.war_history.push({ date: r.value, type: 'war_lost' }); }
-    }
-  }
-  result.war_history = [...new Map(result.war_history.map(w => [w.date + w.type, w])).values()];
+
   result.war_history.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function extractCountryNames(data: Buffer, playerCountryId: string, playerName: string): Map<string, string> {
+  const names = new Map<string, string>();
+  names.set(playerCountryId, playerName);
+  const marker = data.indexOf(Buffer.from('\ncountry=\n{'));
+  if (marker < 0) return names;
+  const open = data.indexOf(0x7b, marker);
+  if (open < 0) return names;
+  const end = findBlockEnd(data, open + 1);
+  const block = data.subarray(open + 1, end - 1);
+  const recordPattern = /\n\s*(\d+)=\s*\{/g;
+
+  for (const match of block.toString('latin1').matchAll(recordPattern)) {
+    const id = match[1];
+    if (names.has(id)) continue;
+    const relativeOpen = (match.index || 0) + match[0].lastIndexOf('{');
+    const recordEnd = findBlockEnd(block, relativeOpen + 1);
+    const header = block.subarray(relativeOpen + 1, Math.min(recordEnd, relativeOpen + 1800)).toString('latin1');
+    const name = parseCountryName(header);
+    if (name) names.set(id, name);
+  }
+  return names;
+}
+
+function parseCountryName(header: string): string | null {
+  const nameStart = header.indexOf('name=');
+  if (nameStart < 0) return null;
+  const nameRegion = header.slice(nameStart, Math.min(header.length, nameStart + 700));
+  const direct = nameRegion.match(/^name=\s*"([^"]+)"/);
+  if (direct) return direct[1];
+
+  const keys = [...nameRegion.matchAll(/key="([^"]+)"/g)].map(match => match[1]);
+  if (keys.length === 0) return null;
+  const meaningful = keys.filter(key => !['%ADJECTIVE%', 'adjective', '1'].includes(key));
+  if (meaningful.length === 0) return null;
+  return meaningful.slice(0, 2).map(humanizeCountryKey).join(' ');
+}
+
+function humanizeCountryKey(key: string): string {
+  const suffixes: Record<string, string> = {
+    Hive: '蜂巢',
+    Accord: '协约',
+    Alliance: '联盟',
+    Commonwealth: '共同体',
+    Confederation: '邦联',
+    Empire: '帝国',
+    Imperium: '帝国',
+    Kingdom: '王国',
+    Republic: '共和国',
+    Union: '联合体',
+  };
+  if (suffixes[key]) return suffixes[key];
+  return key
+    .replace(/^SPEC_/, '')
+    .replace(/^EMPIRE_DESIGN_/, '')
+    .replace(/^PRESCRIPTED_/, '')
+    .replace(/_/g, ' ');
 }

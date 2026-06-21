@@ -1,7 +1,9 @@
 // Flag name → Chinese title mapping (with DB enrichment for anomalies etc.)
 // Covers Butler v2.x and Corvus v4.x format flags
 
-export function flagToTitle(flag: string, db?: any): string {
+import type { DatabaseSync } from 'node:sqlite';
+
+function translateFlag(flag: string, db?: DatabaseSync): string {
   const m: Record<string, string> = {
     // === Core milestones ===
     first_colony: '🏗️ 建立第一个外星殖民地',
@@ -179,9 +181,48 @@ export function flagToTitle(flag: string, db?: any): string {
     mining_drone_expansion_country: '🤖 采矿无人机扩张',
     ignore_country_clone_pulse: '🧬 忽略克隆脉冲',
     psionic_aura_space_object: '🧠 灵能光环天体',
+
+    // === Common narrative flags ===
+    enclave_first_contact: '与太空城邦首次接触',
+    jaunting_traveler_first_contact: '与漫游旅者首次接触',
+    marauders_first_contact: '与掠夺者首次接触',
+    solarpunk_discovered: '发现太阳朋克文明',
+    galactic_market_founded: '银河市场成立',
+    galactic_council_formed: '银河理事会成立',
+    great_khan_dead: '大可汗陨落',
+    great_khan_announcement: '大可汗宣告崛起',
+    horde_triggered: '大可汗部落崛起',
+    cosmic_storm_has_occurred: '宇宙风暴爆发',
+    zro_deposit_spawned: '发现卓尘矿藏',
+    yuht_system_discovered: '发现尤特星系',
+    yuht_homeworld_found: '发现尤特母星',
+    enigmatic_cache_ship: '神秘缓存舰出现',
+    dimensional_fleet: '异次元舰队出现',
+    aggressive_drone_expansion_fleet: '激进无人机扩张舰队出现',
+    mercedes_spawned: '特殊舰船“梅赛德斯”出现',
+    cloning_approach_selected: '选定克隆研究方案',
+    resolution_with_breach_effect_passed: '通过违反银河法的决议',
+    leader_death_events_blocked: '领袖死亡事件暂时停用',
+    immune_to_negative_traits: '领袖免疫负面特质',
+    no_vessel: '未发现可用舰船',
+    special_science_ship: '特殊科研船出现',
+    lost_amoeba_fleet0: '失散的太空变形虫舰队出现',
+    renowned_xenophobe2: '著名排外主义者出现',
+    name_space_amoeba_plural: '太空变形虫',
+    '2505_fired': '事件 2505 触发',
+    creator: '创造者相关事件',
+
+    // === Frequently encountered anomaly categories ===
+    anomaly_ANCREL_RUBRICATOR_CAT: '异常调查：古代遗物线索',
+    anomaly_RAPID_DESERTIFICATION_CAT: '异常调查：急速荒漠化',
+    anomaly_SURVIVAL_POD_WARM_CAT: '异常调查：温热的逃生舱',
+    anomaly_INTEMPORAL_ORB_CAT: '异常调查：超越时间的球体',
+    anomaly_stolen_ship_cat: '异常调查：失窃舰船',
+    anomaly_on_solar_sails_cat: '异常调查：太阳帆',
   };
 
   if (m[flag]) return m[flag];
+  if (m[flag.toLowerCase()]) return m[flag.toLowerCase()];
 
   // Pattern-based rules
   if (flag.startsWith('fc_event_')) return `👽 首次接触事件 #${flag.slice(9)}`;
@@ -189,7 +230,7 @@ export function flagToTitle(flag: string, db?: any): string {
   if (flag.startsWith('surveyed_')) return `🔍 调查${flag.slice(9).replace(/_/g,' ')}星系`;
   if (flag.startsWith('encountered_')) return '👾 遭遇外星生命';
   if (flag.startsWith('established_comms_')) return '📡 建立通讯';
-  if (flag.startsWith('anomaly_')) return `🔬 异常调查: ${flag.slice(8)}`;
+  if (flag.startsWith('anomaly_')) return `异常调查：${humanizeFlag(flag.slice(8))}`;
   if (flag.startsWith('marauder_')) return '🏴‍☠️ 掠夺者事件';
   if (flag.startsWith('triggered_')) return `📜 故事事件: ${flag.slice(10).replace(/_/g,' ')}`;
   if (flag.startsWith('built_')) return `🏗️ 建造: ${flag.slice(6).replace(/_/g,' ')}`;
@@ -243,11 +284,68 @@ export function flagToTitle(flag: string, db?: any): string {
     const anomM = flag.match(/^anomaly\.(\d+)/);
     if (anomM) {
       try {
-        const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(`anomaly.${anomM[1]}`);
+        const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(`anomaly.${anomM[1]}`) as { zh_name?: string } | undefined;
         if (row?.zh_name) return `🔬 调查: ${row.zh_name}`;
       } catch {}
     }
   }
 
-  return flag.replace(/_/g, ' ');
+  if (flag.endsWith('_first_contact')) return `与${humanizeFlag(flag.slice(0, -14))}首次接触`;
+  if (flag.endsWith('_discovered')) return `发现${humanizeFlag(flag.slice(0, -11))}`;
+  if (flag.endsWith('_spawned')) return `${humanizeFlag(flag.slice(0, -8))}出现`;
+  if (flag.endsWith('_formed')) return `${humanizeFlag(flag.slice(0, -7))}成立`;
+  if (flag.endsWith('_founded')) return `${humanizeFlag(flag.slice(0, -8))}成立`;
+  if (flag.endsWith('_triggered')) return `${humanizeFlag(flag.slice(0, -10))}事件触发`;
+  if (flag.endsWith('_selected')) return `选定${humanizeFlag(flag.slice(0, -9))}`;
+  if (flag.endsWith('_found')) return `发现${humanizeFlag(flag.slice(0, -6))}`;
+  if (flag.endsWith('_passed')) return `${humanizeFlag(flag.slice(0, -7))}通过`;
+
+  return humanizeFlag(flag);
+}
+
+const termMap: Record<string, string> = {
+  amoeba: '太空变形虫',
+  crystal: '晶态实体',
+  drone: '无人机',
+  fleet: '舰队',
+  galactic: '银河',
+  market: '市场',
+  council: '理事会',
+  community: '共同体',
+  system: '星系',
+  homeworld: '母星',
+  ship: '舰船',
+  science: '科研',
+  storm: '风暴',
+  traveler: '旅者',
+  vessel: '舰船',
+  xenophobe: '排外主义者',
+};
+
+function humanizeFlag(value: string): string {
+  return value
+    .replace(/_CAT$/i, '')
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map(part => termMap[part.toLowerCase()] || part)
+    .join(' ');
+}
+
+function stripDecorativeSymbols(value: string): string {
+  return value
+    .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function flagToTitle(flag: string, db?: DatabaseSync): string {
+  return stripDecorativeSymbols(translateFlag(flag, db));
+}
+
+export function localizeMilestoneTitle(rawFlag: string | null, currentTitle: string, db?: DatabaseSync): string {
+  const cleanCurrent = stripDecorativeSymbols(currentTitle);
+  if (/[\u3400-\u9fff]/u.test(cleanCurrent)) return cleanCurrent;
+
+  const source = rawFlag || currentTitle;
+  return flagToTitle(source.trim().replace(/\s+/g, '_'), db);
 }

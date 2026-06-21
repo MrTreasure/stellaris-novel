@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     const seenKeys = new Set<string>();
     const allMilestones: Omit<Milestone, 'id'>[] = [];
     for (const evt of parsed.timeline_events) {
-      const dedupKey = `${evt.category}_${evt.approx_date}`;
+      const dedupKey = `${evt.event}_${evt.approx_date}`;
       if (seenKeys.has(dedupKey)) continue;
       seenKeys.add(dedupKey);
       allMilestones.push({
@@ -67,9 +67,9 @@ export async function POST(req: NextRequest) {
     for (const w of parsed.war_history) {
       allMilestones.push({
         save_id: saveId, campaign_id: campaignId!, event_date: w.date,
-        event_type: 'war', title: w.type === 'war_active' ? '⚔️ 参与战争' : '💔 战败',
+        event_type: 'war', title: formatWarTitle(w),
         description: '', importance: w.type === 'war_lost' ? 'critical' : 'major',
-        game_key: null, raw_flag: null, raw_value: w.date,
+        game_key: null, raw_flag: 'war', raw_value: JSON.stringify(w),
       });
     }
     if (parsed.colonies) {
@@ -91,4 +91,12 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
+}
+
+function formatWarTitle(war: { type: string; role?: string; opponent?: string; war_goal?: string }) {
+  const action = war.type === 'war_lost' ? '战败于' : war.role === 'attacker' ? '向' : '遭到';
+  const ending = war.type === 'war_lost' ? '' : war.role === 'attacker' ? '宣战' : '宣战';
+  const opponent = war.opponent || '未知帝国';
+  const goal = war.war_goal ? `，战争目标：${war.war_goal}` : '';
+  return `${action}${opponent}${ending}${goal}`;
 }

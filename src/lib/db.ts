@@ -90,9 +90,6 @@ function runMigrations(db: DatabaseSync) {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- Migration: add background column if missing (SQLite 3.35+)
-    ALTER TABLE novels ADD COLUMN background TEXT DEFAULT '';
-
     CREATE TABLE IF NOT EXISTS chapters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       novel_id INTEGER REFERENCES novels(id),
@@ -170,12 +167,19 @@ function runMigrations(db: DatabaseSync) {
     );
   `);
 
+  // 旧数据库按需补列；CREATE TABLE 已包含该列，新数据库不会重复执行。
+  const novelColumns = db.prepare('PRAGMA table_info(novels)').all() as { name: string }[];
+  if (!novelColumns.some(column => column.name === 'background')) {
+    db.exec("ALTER TABLE novels ADD COLUMN background TEXT DEFAULT ''");
+  }
+
   // 预置默认设置
   const defaults: [string, string][] = [
-    ['api_key', ''],
     ['base_url', 'https://api.deepseek.com'],
     ['model', 'deepseek-chat'],
   ];
+  // API Key 只允许保存在浏览器，不在服务端数据库保留历史值。
+  db.prepare("DELETE FROM settings WHERE key = 'api_key'").run();
   for (const [key, value] of defaults) {
     db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(key, value);
   }

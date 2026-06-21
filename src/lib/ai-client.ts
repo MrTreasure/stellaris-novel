@@ -1,7 +1,5 @@
 // AI 客户端 — OpenAI 兼容 API
-// 支持任意 baseUrl / model / apiKey, 从前端设置读取
-
-import { getSettings } from '@/lib/db';
+// 支持任意 baseUrl / model / apiKey，配置由每次前端请求显式提供。
 
 export interface AIClientConfig {
   apiKey?: string;
@@ -9,24 +7,12 @@ export interface AIClientConfig {
   model?: string;
 }
 
-function getConfig(): Required<AIClientConfig> {
-  const settings = getSettings();
-  return {
-    apiKey: settings.api_key || process.env.DEEPSEEK_API_KEY || '',
-    baseUrl: settings.base_url || 'https://api.deepseek.com',
-    model: settings.model || 'deepseek-chat',
-  };
-}
-
 function resolveConfig(config?: AIClientConfig): Required<AIClientConfig> {
-  if (config) {
-    return {
-      apiKey: config.apiKey || '',
-      baseUrl: config.baseUrl || 'https://api.deepseek.com',
-      model: config.model || 'deepseek-chat',
-    };
-  }
-  return getConfig();
+  return {
+    apiKey: config?.apiKey || process.env.DEEPSEEK_API_KEY || '',
+    baseUrl: config?.baseUrl || 'https://api.deepseek.com',
+    model: config?.model || 'deepseek-chat',
+  };
 }
 
 export async function* streamChat(
@@ -112,4 +98,29 @@ export async function testConnection(config?: AIClientConfig): Promise<{ ok: boo
   } catch (e: any) {
     return { ok: false, message: e.message || '连接失败' };
   }
+}
+
+export async function completeChat(
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  config?: AIClientConfig,
+): Promise<string> {
+  const cfg = resolveConfig(config);
+  const response = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${cfg.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages,
+      stream: false,
+      temperature: 0.2,
+      max_tokens: 1400,
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!response.ok) throw new Error(`概要生成失败 (${response.status})`);
+  const payload = await response.json();
+  return payload.choices?.[0]?.message?.content || '';
 }
