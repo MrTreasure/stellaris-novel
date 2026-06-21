@@ -111,6 +111,30 @@ export function parseSaveFile(filePath: string): ParsedSave {
   extractMegastructures(data, result);
   extractWars(data, playerCountryId, result);
 
+  // Phase 1: Military & Population
+  extractPlanets(data, result);
+  extractPopulation(data, result);
+  extractFleets(data, result);
+
+  // Phase 2: Leaders & Diplomacy
+  extractLeaders(data, result);
+  extractWarsDetailed(data, result);
+  extractDiplomacy(data, result);
+
+  // Phase 3: Story Events & Archaeology
+  extractFiredEvents(data, result);
+  extractArchaeology(data, result);
+  extractSituations(data, result);
+  extractEventTargets(data, result);
+  extractPlayerEvents(data, result);
+
+  // Phase 4: Worldbuilding
+  extractInfrastructure(data, result);
+  extractEspionage(data, result);
+  extractResolutions(data, result);
+  extractGroundCombat(data, result);
+  extractMapObjects(data, result);
+
   return result;
 }
 
@@ -438,4 +462,545 @@ function humanizeCountryKey(key: string): string {
     .replace(/^EMPIRE_DESIGN_/, '')
     .replace(/^PRESCRIPTED_/, '')
     .replace(/_/g, ' ');
+}
+
+// ===== Phase 1: Military & Population =====
+
+function extractPlanets(data: Buffer, result: ParsedSave) {
+  try {
+    // Corvus v4.x: planet= block (singular), each entry has planet_class and optional controller
+    const planetBlock = findSectionBlock(data, 'planet=');
+    if (!planetBlock) return;
+
+    const text = planetBlock.toString('latin1');
+    const habitableTypes = new Set([
+      'pc_continental', 'pc_ocean', 'pc_arid', 'pc_arctic', 'pc_tundra',
+      'pc_alpine', 'pc_desert', 'pc_tropical', 'pc_savannah', 'pc_gaia',
+      'pc_city', 'pc_hive', 'pc_habitat', 'pc_machine', 'pc_ring',
+      'pc_relativistic', 'pc_infested', 'pc_nuked', 'pc_broken',
+      'pc_shattered', 'pc_shattered_2', 'pc_egg_world',
+    ]);
+    const colonies: { name: string; type: string; pops: number }[] = [];
+
+    const planetPattern = /\n\s*(\d+)=\s*\{/g;
+    let pm;
+    while ((pm = planetPattern.exec(text)) !== null) {
+      if (colonies.length >= 200) break;
+      const pStart = pm.index + pm[0].lastIndexOf('{');
+      const pEnd = findBlockEnd(planetBlock, pStart + 1);
+      const pText = planetBlock.subarray(pStart + 1, Math.min(pEnd, pStart + 1 + 2000)).toString('latin1');
+
+      // Colonized = has a controller assigned AND is habitable (or has pops)
+      const ctrlM = pText.match(/controller\s*=\s*(\d+)/);
+      const hasController = ctrlM && ctrlM[1] !== '4294967295';
+      const classM = pText.match(/planet_class\s*=\s*"(pc_\w+)"/);
+      const pClass = classM ? classM[1] : '';
+      const isHabitable = habitableTypes.has(pClass);
+      const hasPops = /\bpop\s*=\s*\d+/.test(pText);
+
+      if (!hasController && !hasPops) continue;
+      if (!isHabitable && !hasPops) continue;
+
+      // Extract name (can be a localization key block)
+      let name = `行星#${pm[1]}`;
+      const nameBlock = pText.match(/name\s*=\s*\{([^}]+)\}/);
+      if (nameBlock) {
+        const keyM = nameBlock[1].match(/key="([^"]+)"/);
+        if (keyM) name = keyM[1];
+      } else {
+        const nameM = pText.match(/name="([^"]+)"/);
+        if (nameM) name = decodePdxName(Buffer.from(nameM[1], 'latin1'));
+      }
+      const popCount = (pText.match(/\bpop\s*=\s*\d+/g) || []).length;
+      colonies.push({ name, type: pClass.replace('pc_', ''), pops: popCount });
+    }
+    result.planets = { colonized: colonies.length, colonies };
+  } catch { /* best effort */ }
+}
+
+function extractPopulation(data: Buffer, result: ParsedSave) {
+  try {
+    const popBlock = findSectionBlock(data, 'pop=');
+    if (!popBlock) return;
+    // Count pops by counting "pop=" keys (each pop entry)
+    const popMatches = popBlock.toString('latin1').match(/\bpop\s*=/g);
+    const total = popMatches ? popMatches.length : 0;
+
+    // Extract faction data
+    const factBlock = findSectionBlock(data, 'pop_factions=');
+    const factions: { name: string; size: number }[] = [];
+    if (factBlock) {
+      const factText = factBlock.toString('latin1');
+      const factPattern = /\n\s*(\d+)=\s*\{/g;
+      let fm;
+      while ((fm = factPattern.exec(factText)) !== null) {
+        if (factions.length >= 20) break;
+        const fStart = fm.index + fm[0].lastIndexOf('{');
+        const fEnd = findBlockEnd(factBlock, fStart + 1);
+        const fText = factBlock.subarray(fStart + 1, Math.min(fEnd, fStart + 1 + 1000)).toString('latin1');
+        const nameM = fText.match(/name="([^"]+)"/);
+        const name = nameM ? nameM[1] : `派系#${fm[1]}`;
+        const supportM = fText.match(/support\s*=\s*([\d.]+)/);
+        const size = supportM ? Math.round(parseFloat(supportM[1]) * 100) : 0;
+        factions.push({ name, size });
+      }
+    }
+    result.population = { total, factions };
+  } catch { /* best effort */ }
+}
+
+function extractFleets(data: Buffer, result: ParsedSave) {
+  try {
+    const fleetBlock = findSectionBlock(data, 'fleet=');
+    if (!fleetBlock) return;
+
+    const fleetText = fleetBlock.toString('latin1');
+    const fleetEntries = fleetText.match(/\n\s*(\d+)=\s*\{/g);
+    const totalFleets = fleetEntries ? fleetEntries.length : 0;
+
+    // Count ships from ships= section
+    const shipBlock = findSectionBlock(data, 'ships=');
+    let totalShips = 0;
+    if (shipBlock) {
+      const shipMatches = shipBlock.toString('latin1').match(/\n\s*(\d+)=\s*\{/g);
+      totalShips = shipMatches ? shipMatches.length : 0;
+    }
+
+    // Extract notable fleets
+    const notable: { name: string; ships: number; power: number }[] = [];
+    const fleetPattern = /\n\s*(\d+)=\s*\{/g;
+    let fm;
+    while ((fm = fleetPattern.exec(fleetText)) !== null) {
+      if (notable.length >= 10) break;
+      const fStart = fm.index + fm[0].lastIndexOf('{');
+      const fEnd = findBlockEnd(fleetBlock, fStart + 1);
+      const fText = fleetBlock.subarray(fStart + 1, Math.min(fEnd, fStart + 1 + 2000)).toString('latin1');
+
+      // Name may be a localization key block: name={key="..." variables={...}}
+      let name;
+      const nameBlock = fText.match(/name\s*=\s*\{([^}]+)\}/);
+      if (nameBlock) {
+        const keyM = nameBlock[1].match(/key="([^"]+)"/);
+        if (keyM) name = keyM[1];
+      } else {
+        const strM = fText.match(/name\s*=\s*"([^"]+)"/);
+        name = strM ? decodePdxName(Buffer.from(strM[1], 'latin1')) : undefined;
+      }
+      if (!name) continue;
+
+      // Ships are listed as: ships = { 0 1 2 ... }
+      let shipCount = 0;
+      const shipsBlock = fText.match(/ships\s*=\s*\{([^}]*)\}/);
+      if (shipsBlock) {
+        shipCount = (shipsBlock[1].match(/\d+/g) || []).length;
+      }
+
+      // Power may be in fleet_stats.combat_stats
+      let power = 0;
+      const fpM = fText.match(/fleet_power\s*=\s*([\d.]+)/);
+      if (fpM) power = Math.round(parseFloat(fpM[1]));
+
+      // Only include non-starbase fleets with ships or power
+      const isStarbase = /station\s*=\s*yes/.test(fText);
+      if (!isStarbase && (shipCount > 0 || power > 0)) {
+        notable.push({ name, ships: shipCount, power });
+      }
+    }
+    notable.sort((a, b) => b.power - a.power);
+
+    const totalPower = notable.reduce((s, f) => s + f.power, 0);
+    result.fleets = { total_fleets: totalFleets, total_ships: totalShips, total_power: totalPower, notable };
+  } catch { /* best effort */ }
+}
+
+// ===== Phase 2: Leaders & Diplomacy =====
+
+function extractLeaders(data: Buffer, result: ParsedSave) {
+  try {
+    // Corvus v4.x: leaders are embedded within country records across the file.
+    // Scan the gamestate for leader_class= patterns and extract nearby name/level.
+    const byClass: Record<string, number> = {};
+    const top: { name: string; class: string; level: number; traits: string[] }[] = [];
+
+    // Search across the file for leader_class=
+    const text = data.toString('latin1');
+    const leaderPattern = /leader_class\s*=\s*"(scientist|admiral|general|governor|ruler|official|commander)"/g;
+    let lm;
+    while ((lm = leaderPattern.exec(text)) !== null) {
+      const lClass = lm[1];
+      byClass[lClass] = (byClass[lClass] || 0) + 1;
+
+      // Extract surrounding data (800 chars after class match)
+      const ctxStart = lm.index;
+      const context = text.slice(ctxStart, ctxStart + 800);
+      const levelM = context.match(/level\s*=\s*(\d+)/);
+      const level = levelM ? parseInt(levelM[1]) : 1;
+
+      if (level >= 5 && top.length < 20) {
+        let name = '未知';
+        // Name block: name={full_names={key="NAME_FORMAT" ...}}
+        const fullNamesM = context.match(/full_names\s*=\s*\{[^}]*key="([^"]+)"/);
+        if (fullNamesM) {
+          name = fullNamesM[1];
+        } else {
+          const nameBlock = context.match(/name\s*=\s*\{([^}]+)\}/);
+          if (nameBlock) {
+            const keyM = nameBlock[1].match(/key="([^"]+)"/);
+            if (keyM) name = keyM[1];
+          } else {
+            const strM = context.match(/name\s*=\s*"([^"]+)"/);
+            if (strM) name = decodePdxName(Buffer.from(strM[1], 'latin1'));
+          }
+        }
+        const traits: string[] = [];
+        const traitM = context.matchAll(/trait="(\w+)"/g);
+        for (const t of traitM) traits.push(t[1]);
+        // Also check for traits= list: traits="xxx" traits="yyy"
+        const traitsListM = context.matchAll(/traits\s*=\s*"(\w+)"/g);
+        for (const t of traitsListM) traits.push(t[1]);
+        if (!top.some(l => l.name === name)) top.push({ name, class: lClass, level, traits });
+      }
+    }
+
+    top.sort((a, b) => b.level - a.level);
+    result.leaders = {
+      total: Object.values(byClass).reduce((s, v) => s + v, 0),
+      by_class: byClass,
+      top: top.slice(0, 15),
+    };
+  } catch { /* best effort */ }
+}
+
+function extractWarsDetailed(data: Buffer, result: ParsedSave) {
+  try {
+    const warBlock = findSectionBlock(data, 'war=');
+    if (!warBlock) return;
+
+    const wText = warBlock.toString('latin1');
+    const list: { name: string; attacker: string; defender: string; goal?: string; exhaustion?: string }[] = [];
+    const warPattern = /\n\s*(\d+)=\s*\{/g;
+    let wm;
+    while ((wm = warPattern.exec(wText)) !== null) {
+      if (list.length >= 20) break;
+      const wStart = wm.index + wm[0].lastIndexOf('{');
+      const wEnd = findBlockEnd(warBlock, wStart + 1);
+      const wt = warBlock.subarray(wStart + 1, Math.min(wEnd, wStart + 1 + 3000)).toString('latin1');
+
+      // Name may be a localization key block
+      let name;
+      const nameBlock = wt.match(/name\s*=\s*\{([^}]+)\}/);
+      if (nameBlock) {
+        const keyM = nameBlock[1].match(/key="([^"]+)"/);
+        if (keyM) name = keyM[1];
+      } else {
+        const strM = wt.match(/name\s*=\s*"([^"]+)"/);
+        name = strM ? decodePdxName(Buffer.from(strM[1], 'latin1')) : '未知战争';
+      }
+
+      const attackers: string[] = [];
+      const defenders: string[] = [];
+      const attSec = wt.match(/attackers\s*=\s*\{([^}]+)\}/);
+      if (attSec) for (const m of attSec[1].matchAll(/\d+/g)) attackers.push(m[0]);
+      const defSec = wt.match(/defenders\s*=\s*\{([^}]+)\}/);
+      if (defSec) for (const m of defSec[1].matchAll(/\d+/g)) defenders.push(m[0]);
+
+      const goalM = wt.match(/war_goal\s*=\s*"(\w+)"/);
+      const goal = goalM ? goalM[1] : undefined;
+      const exhM = wt.match(/exhaustion\s*=\s*([\d.]+)/);
+      const exhaustion = exhM ? `${Math.round(parseFloat(exhM[1]) * 100)}%` : undefined;
+
+      list.push({ name: name!, attacker: attackers.join(','), defender: defenders.join(','), goal, exhaustion });
+    }
+    result.wars_detailed = { active: list.length, list };
+  } catch { /* best effort */ }
+}
+
+function extractDiplomacy(data: Buffer, result: ParsedSave) {
+  try {
+    const fedBlock = findSectionBlock(data, 'federation=');
+    let fedName: string | undefined;
+    let fedSize: number | undefined;
+    if (fedBlock) {
+      const fedText = fedBlock.subarray(0, 5000).toString('latin1');
+      const nameM = fedText.match(/name="([^"]+)"/);
+      fedName = nameM ? decodePdxName(Buffer.from(nameM[1], 'latin1')) : undefined;
+      const memberCount = (fedText.match(/\n\s*\d+=\s*\{/g) || []).length;
+      if (memberCount > 0) fedSize = memberCount;
+    }
+
+    // Trade deals
+    const tradeBlock = findSectionBlock(data, 'trade_deal=');
+    let tradeDeals = 0;
+    if (tradeBlock) {
+      tradeDeals = (tradeBlock.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    }
+
+    // Truces
+    const truceBlock = findSectionBlock(data, 'truce=');
+    let truces = 0;
+    if (truceBlock) {
+      truces = (truceBlock.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    }
+
+    // Agreements
+    const agreeBlock = findSectionBlock(data, 'agreements=');
+    let subjects = 0;
+    if (agreeBlock) {
+      const aText = agreeBlock.toString('latin1');
+      subjects = (aText.match(/subject/g) || []).length;
+    }
+
+    // Galactic community
+    let gcMember = false;
+    const gcBlock = findSectionBlock(data, 'galactic_community=');
+    if (gcBlock) {
+      gcMember = true;
+    }
+
+    // Rivals (scan country section)
+    let rivals = 0;
+    const countryBlock = findSectionBlock(data, 'country=');
+    if (countryBlock) {
+      rivals = (countryBlock.toString('latin1').match(/\brival\b/g) || []).length;
+    }
+
+    result.diplomacy = { federation_name: fedName, federation_size: fedSize, gc_member: gcMember, trade_deals: tradeDeals, truces, rivals, subjects };
+  } catch { /* best effort */ }
+}
+
+// ===== Phase 3: Story Events & Archaeology =====
+
+function extractFiredEvents(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'fired_event_ids=');
+    if (!block) return;
+    const text = block.toString('latin1');
+    const events: string[] = [];
+    // Format: "event.id" (quoted strings, one per line)
+    const pattern = /"([\w.]+)"/g;
+    let m;
+    while ((m = pattern.exec(text)) !== null) {
+      if (events.length >= 500) break;
+      if (m[1].includes('.')) events.push(m[1]);
+    }
+    result.fired_events = { total: events.length, recent: events.slice(-200) };
+  } catch { /* best effort */ }
+}
+
+function extractArchaeology(data: Buffer, result: ParsedSave) {
+  try {
+    // Corvus v4.x: archaeological_sites = { sites = { 0={...} } }
+    const outerBlock = findSectionBlock(data, 'archaeological_sites=');
+    if (!outerBlock) return;
+
+    // Find the inner sites={ block
+    const sitesIdx = outerBlock.indexOf(Buffer.from('\nsites='));
+    let innerBlock = outerBlock;
+    if (sitesIdx >= 0) {
+      const open = outerBlock.indexOf(0x7b, sitesIdx);
+      if (open >= 0) {
+        const end = findBlockEnd(outerBlock, open + 1);
+        innerBlock = outerBlock.subarray(open + 1, end - 1);
+      }
+    }
+
+    const text = innerBlock.toString('latin1');
+    const sites: { name: string; stage: number; total_stages: number }[] = [];
+    const sitePattern = /\n\s*(\d+)=\s*\{/g;
+    let sm;
+    while ((sm = sitePattern.exec(text)) !== null) {
+      if (sites.length >= 20) break;
+      const sStart = sm.index + sm[0].lastIndexOf('{');
+      const sEnd = findBlockEnd(innerBlock, sStart + 1);
+      const st = innerBlock.subarray(sStart + 1, Math.min(sEnd, sStart + 1 + 2000)).toString('latin1');
+
+      const typeM = st.match(/type\s*=\s*"(\w+)"/);
+      const siteName = typeM ? typeM[1] : `遗址#${sm[1]}`;
+
+      // Determine current stage from index or completed entries
+      const idxM = st.match(/index\s*=\s*(\d+)/);
+      const index = idxM ? parseInt(idxM[1]) : 0;
+
+      // completed={ {country=... date=...} ... } count
+      const completedMatches = st.match(/\bcountry\s*=\s*\d+/g);
+      const completedCount = completedMatches ? completedMatches.length : 0;
+
+      // Total stages from difficulty (approximate) or type lookup
+      const diffM = st.match(/difficulty\s*=\s*(\d+)/);
+      const difficulty = diffM ? parseInt(diffM[1]) : 0;
+
+      // If there's no index but there are completed entries, use that as stage
+      const stage = index > 0 ? index : completedCount;
+      const totalStages = difficulty > 0 ? difficulty : (completedCount + 2);
+
+      if (stage >= 0) sites.push({ name: siteName, stage, total_stages: Math.max(totalStages, stage + 1) });
+    }
+    result.archaeology = { active: sites.length, sites };
+  } catch { /* best effort */ }
+}
+
+function extractSituations(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'situations=');
+    if (!block) return;
+    const text = block.toString('latin1');
+    const list: { type: string; target?: string; progress?: number }[] = [];
+    const sitPattern = /\n\s*(\d+)=\s*\{/g;
+    let sm;
+    while ((sm = sitPattern.exec(text)) !== null) {
+      if (list.length >= 30) break;
+      const sStart = sm.index + sm[0].lastIndexOf('{');
+      const sEnd = findBlockEnd(block, sStart + 1);
+      const st = block.subarray(sStart + 1, Math.min(sEnd, sStart + 1 + 1500)).toString('latin1');
+
+      const typeM = st.match(/situation_type\s*=\s*"(\w+)"/);
+      const type = typeM ? typeM[1] : 'unknown';
+      const progressM = st.match(/progress\s*=\s*([\d.]+)/);
+      const progress = progressM ? Math.round(parseFloat(progressM[1]) * 100) : undefined;
+      const targetM = st.match(/target_name\s*=\s*"([^"]+)"/);
+      const target = targetM ? targetM[1] : undefined;
+
+      list.push({ type, target, progress });
+    }
+    result.situations = { count: list.length, list };
+  } catch { /* best effort */ }
+}
+
+function extractEventTargets(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'saved_event_target=');
+    if (!block) return;
+    const count = (block.toString('latin1').match(/\n\s*\w+=\s*\{/g) || []).length;
+    result.event_targets = { count };
+  } catch { /* best effort */ }
+}
+
+function extractPlayerEvents(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'player_event=');
+    if (!block) return;
+    const count = (block.toString('latin1').match(/\n\s*\w+\s*=\s*\{/g) || []).length;
+    result.player_choices = { count };
+  } catch { /* best effort */ }
+}
+
+// ===== Phase 4: Worldbuilding =====
+
+function extractInfrastructure(data: Buffer, result: ParsedSave) {
+  try {
+    // Sectors
+    const secBlock = findSectionBlock(data, 'sectors=');
+    let sectors = 0;
+    if (secBlock) {
+      sectors = (secBlock.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    }
+
+    // Buildings
+    const buildBlock = findSectionBlock(data, 'buildings=');
+    const buildings: Record<string, number> = {};
+    if (buildBlock) {
+      const bText = buildBlock.subarray(0, 200000).toString('latin1');
+      const bm = bText.matchAll(/building\s*=\s*"(\w+)"/g);
+      for (const b of bm) {
+        buildings[b[1]] = (buildings[b[1]] || 0) + 1;
+      }
+    }
+
+    // Districts
+    const distBlock = findSectionBlock(data, 'districts=');
+    let totalDistricts = 0;
+    if (distBlock) {
+      totalDistricts = (distBlock.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    }
+
+    result.infrastructure = { sectors, buildings, total_districts: totalDistricts };
+  } catch { /* best effort */ }
+}
+
+function extractEspionage(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'espionage_operations=');
+    if (!block) { result.espionage = { active_ops: 0 }; return; }
+    const count = (block.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    result.espionage = { active_ops: count };
+  } catch { result.espionage = { active_ops: 0 }; }
+}
+
+function extractResolutions(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'resolution=');
+    if (!block) { result.resolutions = { passed: 0 }; return; }
+    const count = (block.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    result.resolutions = { passed: count };
+  } catch { result.resolutions = { passed: 0 }; }
+}
+
+function extractGroundCombat(data: Buffer, result: ParsedSave) {
+  try {
+    const block = findSectionBlock(data, 'ground_combat=');
+    if (!block) { result.ground_combat = { active_invasions: 0 }; return; }
+    const count = (block.toString('latin1').match(/\n\s*\d+=\s*\{/g) || []).length;
+    result.ground_combat = { active_invasions: count };
+  } catch { result.ground_combat = { active_invasions: 0 }; }
+}
+
+function extractMapObjects(data: Buffer, result: ParsedSave) {
+  try {
+    const goBlock = findSectionBlock(data, 'galactic_object=');
+    let systemsOwned = 0;
+    if (goBlock) {
+      const goText = goBlock.subarray(0, 1000000).toString('latin1');
+      systemsOwned = (goText.match(/starbase\s*=/g) || []).length;
+    }
+
+    const bypassBlock = findSectionBlock(data, 'bypasses=');
+    let gateways = 0, wormholes = 0;
+    if (bypassBlock) {
+      const bText = bypassBlock.subarray(0, 200000).toString('latin1');
+      gateways = (bText.match(/gateway/g) || []).length;
+      wormholes = (bText.match(/wormhole/g) || []).length;
+    }
+
+    result.map_objects = { systems_owned: systemsOwned, gateways, wormholes };
+  } catch { /* best effort */ }
+}
+
+// ===== Block finder helper =====
+
+/** Find a top-level section block by key, returning the inner content between braces.
+ *  Handles optional whitespace between newline and key (tabs, spaces). */
+function findSectionBlock(data: Buffer, key: string): Buffer | null {
+  const keyBuf = Buffer.from(key);
+  // Search for the key at the start of a line (after \n, possibly with whitespace)
+  let pos = 0;
+  while (pos < data.length) {
+    const idx = data.indexOf(keyBuf, pos);
+    if (idx < 0) return null;
+
+    // Check if key is at start of line: previous non-whitespace char should be \n or it's the beginning
+    let before = idx - 1;
+    while (before >= 0 && (data[before] === 0x20 || data[before] === 0x09)) before--; // skip spaces/tabs
+    if (before < 0 || data[before] === 0x0a) {
+      // Found at line start — now find the opening brace
+      let bracePos = idx + keyBuf.length;
+      while (bracePos < data.length && (data[bracePos] === 0x20 || data[bracePos] === 0x09 || data[bracePos] === 0x0a || data[bracePos] === 0x3d)) bracePos++;
+      if (bracePos < data.length && data[bracePos] === 0x7b) {
+        const end = findBlockEnd(data, bracePos + 1);
+        if (end > bracePos) return data.subarray(bracePos + 1, end - 1);
+      }
+      // Also try: key on one line, { on next line
+      let nlPos = idx + keyBuf.length;
+      while (nlPos < data.length && data[nlPos] !== 0x0a && data[nlPos] !== 0x7b) nlPos++;
+      if (nlPos < data.length && data[nlPos] === 0x0a) {
+        nlPos++;
+        while (nlPos < data.length && (data[nlPos] === 0x20 || data[nlPos] === 0x09)) nlPos++;
+        if (nlPos < data.length && data[nlPos] === 0x7b) {
+          const end = findBlockEnd(data, nlPos + 1);
+          if (end > nlPos) return data.subarray(nlPos + 1, end - 1);
+        }
+      }
+    }
+    pos = idx + keyBuf.length;
+  }
+  return null;
 }

@@ -40,8 +40,12 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
       <div className="my-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[{l:'帝国规模',v:latest?.empire_size?.toLocaleString(),s:first?.empire_size,c:'text-[#7be5d9]'},
           {l:'军事力量',v:latest?.military_power?.toLocaleString(),c:'text-[#7fd6a0]'},
+          {l:'舰队战力',v:latest?.fleet_power?.toLocaleString(),c:'text-[#d9c07d]'},
           {l:'科技力量',v:latest?.tech_power?.toLocaleString(),c:'text-[#aab8ef]'},
-          {l:'事件类型',v:Object.keys(stats.event_types).length,c:'text-[#dec374]'}].map((x,i) => (
+          {l:'总人口',v:latest?.total_pops?.toLocaleString(),c:'text-[#b4bced]'},
+          {l:'殖民地',v:latest?.num_colonies?.toLocaleString(),s:first?.num_colonies,c:'text-[#dec374]'},
+          {l:'活跃战争',v:latest?.active_wars || '0',c:'text-[#e59a92]'},
+          {l:'事件类型',v:Object.keys(stats.event_types).length,c:'text-[#88d9d2]'}].map((x,i) => (
           <div key={i} className="panel p-4 sm:p-5">
             <div className="mb-2 text-xs uppercase tracking-[0.14em] text-[#6f8b8d]">{x.l}</div>
             <div className={`font-mono text-2xl font-semibold sm:text-3xl ${x.c}`}>{x.v || '?'}</div>

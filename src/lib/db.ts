@@ -62,7 +62,11 @@ function runMigrations(db: DatabaseSync) {
       species_name TEXT,
       species_traits TEXT,
       raw_json TEXT,
-      uploaded_at TEXT DEFAULT (datetime('now'))
+      uploaded_at TEXT DEFAULT (datetime('now')),
+      fleet_power INTEGER DEFAULT 0,
+      total_pops INTEGER DEFAULT 0,
+      num_colonies INTEGER DEFAULT 0,
+      active_wars INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS milestones (
@@ -224,6 +228,15 @@ function runMigrations(db: DatabaseSync) {
     db.exec("ALTER TABLE novels ADD COLUMN background TEXT DEFAULT ''");
   }
 
+  // 补全 saves 表新增的快捷列
+  const saveColNames = ['fleet_power', 'total_pops', 'num_colonies', 'active_wars'];
+  const saveColumns = db.prepare('PRAGMA table_info(saves)').all() as { name: string }[];
+  for (const col of saveColNames) {
+    if (!saveColumns.some(c => c.name === col)) {
+      db.exec(`ALTER TABLE saves ADD COLUMN ${col} INTEGER DEFAULT 0`);
+    }
+  }
+
   // 预置默认设置
   const defaults: [string, string][] = [
     ['base_url', 'https://api.deepseek.com'],
@@ -303,13 +316,14 @@ export function insertSave(save: Omit<SaveRecord, 'id' | 'uploaded_at'>): number
   const r = d.prepare(`
     INSERT INTO saves (campaign_id, filename, game_date, empire_name, empire_size,
       military_power, tech_power, victory_rank, authority, ethics, civics, origin,
-      species_name, species_traits, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      species_name, species_traits, raw_json, fleet_power, total_pops, num_colonies, active_wars)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     save.campaign_id, save.filename, save.game_date, save.empire_name,
     save.empire_size, save.military_power, save.tech_power, save.victory_rank,
     save.authority, save.ethics, save.civics, save.origin,
-    save.species_name, save.species_traits, save.raw_json
+    save.species_name, save.species_traits, save.raw_json,
+    save.fleet_power ?? 0, save.total_pops ?? 0, save.num_colonies ?? 0, save.active_wars ?? 0
   );
   return Number(r.lastInsertRowid);
 }

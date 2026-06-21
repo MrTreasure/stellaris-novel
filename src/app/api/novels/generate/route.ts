@@ -31,7 +31,16 @@ function buildPrompt(campaignId: number): { system: string; intro: string } {
     size: s.empire_size,
     military: s.military_power,
     tech: s.tech_power,
+    fleet: s.fleet_power,
+    pops: s.total_pops,
+    colonies: s.num_colonies,
   }));
+
+  // Attempt to parse enriched data from latest save's raw_json
+  let rawParsed: any = null;
+  if (latestSave?.raw_json) {
+    try { rawParsed = JSON.parse(latestSave.raw_json); } catch {}
+  }
 
   const keyMilestones = milestones.filter(m => m.importance === 'critical' || m.importance === 'major');
   const events = keyMilestones.length > 50
@@ -78,11 +87,33 @@ ${loreText}`;
 最终规模: ${empireInfo.size || '?'}
 最终军力: ${empireInfo.military?.toLocaleString() || '?'}
 最终科技: ${empireInfo.tech?.toLocaleString() || '?'}
+舰队战力: ${latestSave?.fleet_power?.toLocaleString() || '?'}
+总人口: ${latestSave?.total_pops?.toLocaleString() || '?'}
+殖民地数: ${latestSave?.num_colonies || '?'}
+活跃战争: ${latestSave?.active_wars || '?'}
 胜利排名: 第${empireInfo.rank || '?'}名
 
 ## 实力演变
 
-${evolution.map(e => `- ${e.date}: 规模${e.size}, 军力${e.military?.toLocaleString()}, 科技${e.tech?.toLocaleString()}`).join('\n')}
+${evolution.map(e => `- ${e.date}: 规模${e.size}, 军力${e.military?.toLocaleString()}, 科技${e.tech?.toLocaleString()}, 舰队${e.fleet?.toLocaleString() || '?'}, 人口${e.pops?.toLocaleString() || '?'}`).join('\n')}
+
+## 著名领袖
+${rawParsed?.leaders?.top ? rawParsed.leaders.top.map((l: any) => `- ${l.name} (${l.class}, ${l.level}级, 特质: ${(l.traits || []).join(', ')})`).join('\n') : '暂无数据'}
+
+## 著名舰队
+${rawParsed?.fleets?.notable ? rawParsed.fleets.notable.slice(0, 10).map((f: any) => `- ${f.name}: ${f.ships}舰, 战力${f.power?.toLocaleString()}`).join('\n') : '暂无数据'}
+
+## 外交局势
+${rawParsed?.diplomacy ? `联邦: ${rawParsed.diplomacy.federation_name || '无'}, 贸易协定: ${rawParsed.diplomacy.trade_deals || 0}, 附庸国: ${rawParsed.diplomacy.subjects || 0}, 宿敌: ${rawParsed.diplomacy.rivals || 0}${rawParsed.diplomacy.gc_member ? ', 星海共同体成员' : ''}` : '暂无数据'}
+
+## 活跃战争
+${rawParsed?.wars_detailed?.list ? rawParsed.wars_detailed.list.map((w: any) => `- ${w.name}: ${w.attacker} vs ${w.defender}${w.goal ? ` (目标: ${w.goal})` : ''}${w.exhaustion ? ` [厌战: ${w.exhaustion}]` : ''}`).join('\n') : '暂无'}
+
+## 考古遗址与局势
+${rawParsed?.archaeology?.sites ? rawParsed.archaeology.sites.map((a: any) => `- [考古] ${a.name}: 阶段${a.stage}/${a.total_stages}`).join('\n') : ''}${rawParsed?.situations?.list ? rawParsed.situations.list.map((s: any) => `- [局势] ${s.type}${s.progress !== undefined ? ` (${s.progress}%)` : ''}${s.target ? ` → ${s.target}` : ''}`).join('\n') : ''}
+
+## 派系
+${rawParsed?.population?.factions ? rawParsed.population.factions.map((f: any) => `- ${f.name}: ${f.size}%支持`).join('\n') : '暂无数据'}
 
 ## 重大事件时间轴
 

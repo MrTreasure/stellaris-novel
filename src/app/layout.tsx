@@ -23,9 +23,19 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <a href="#main-content" className="skip-link">跳至主要内容</a>
         <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden" aria-hidden="true">
-          <div className="space-background absolute inset-0 opacity-25" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(50,201,190,0.14),transparent_38%),radial-gradient(ellipse_at_85%_30%,rgba(92,110,185,0.12),transparent_34%),linear-gradient(180deg,rgba(3,10,18,0.3),#030811_72%)]" />
+          <Image
+            src="/images/nomads-background.png"
+            alt=""
+            fill
+            className="object-cover opacity-20"
+            priority
+          />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(50,201,190,0.10),transparent_38%),radial-gradient(ellipse_at_85%_30%,rgba(92,110,185,0.08),transparent_34%),linear-gradient(180deg,rgba(3,10,18,0.4),#030811_72%)]" />
           <div className="stellar-grid absolute inset-0" />
+        </div>
+        {/* Version tag */}
+        <div className="fixed bottom-3 right-4 z-50 font-mono text-[10px] tracking-[0.22em] text-[#406c70]/70 select-none pointer-events-none">
+          Stellaris v4.4.3
         </div>
         <nav className="relative z-20 border-b border-[#376d73]/35 bg-[#030811]/88 backdrop-blur-xl">
           <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">

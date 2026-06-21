@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
       species_name: parsed.empire_info.species_name || null,
       species_traits: JSON.stringify(parsed.empire_info.traits || []),
       raw_json: JSON.stringify(parsed),
+      fleet_power: parsed.fleets?.total_power || null,
+      total_pops: parsed.population?.total || null,
+      num_colonies: parsed.planets?.colonized || null,
+      active_wars: parsed.wars_detailed?.active || null,
     });
 
     // 插入里程碑
@@ -81,6 +85,63 @@ export async function POST(req: NextRequest) {
           importance: 'major', game_key: 'colony_founded', raw_flag: 'colony', raw_value: c.name,
         });
       }
+    }
+    // Enriched milestones — fleet & population
+    if (parsed.fleets?.notable) {
+      for (const f of parsed.fleets.notable.slice(0, 5)) {
+        allMilestones.push({
+          save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+          event_type: 'military', title: `🚢 舰队: ${f.name} (${f.ships}舰, 战力${f.power.toLocaleString()})`,
+          description: '', importance: 'major', game_key: 'fleet', raw_flag: 'fleet', raw_value: f.name,
+        });
+      }
+    }
+    // Enriched milestones — leaders
+    if (parsed.leaders?.top) {
+      for (const l of parsed.leaders.top) {
+        const classLabel: Record<string, string> = { scientist: '科学家', admiral: '提督', general: '将军', governor: '总督', ruler: '统治者', official: '官员', commander: '指挥官' };
+        allMilestones.push({
+          save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+          event_type: 'leader', title: `⭐ ${classLabel[l.class] || l.class}: ${l.name} (${l.level}级)`,
+          description: l.traits.join(', '), importance: l.level >= 8 ? 'critical' : 'major',
+          game_key: 'leader', raw_flag: `leader_${l.class}`, raw_value: l.name,
+        });
+      }
+    }
+    // Enriched milestones — archaeology
+    if (parsed.archaeology?.sites) {
+      for (const a of parsed.archaeology.sites) {
+        allMilestones.push({
+          save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+          event_type: 'exploration', title: `🏺 考古: ${a.name} (阶段${a.stage}/${a.total_stages})`,
+          description: '', importance: 'major', game_key: 'archaeology', raw_flag: 'archaeology', raw_value: a.name,
+        });
+      }
+    }
+    // Enriched milestones — situations
+    if (parsed.situations?.list) {
+      for (const s of parsed.situations.list) {
+        allMilestones.push({
+          save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+          event_type: 'event', title: `📋 局势: ${s.type}${s.progress ? ` (${s.progress}%)` : ''}`,
+          description: s.target || '', importance: 'major', game_key: 'situation', raw_flag: s.type, raw_value: s.target || null,
+        });
+      }
+    }
+    // Enriched milestones — diplomacy
+    if (parsed.diplomacy?.federation_name) {
+      allMilestones.push({
+        save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+        event_type: 'diplomacy', title: `🤝 联邦: ${parsed.diplomacy.federation_name} (${parsed.diplomacy.federation_size || '?'}成员)`,
+        description: '', importance: 'critical', game_key: 'federation', raw_flag: 'federation', raw_value: parsed.diplomacy.federation_name,
+      });
+    }
+    if (parsed.diplomacy?.gc_member) {
+      allMilestones.push({
+        save_id: saveId, campaign_id: campaignId!, event_date: parsed.game_date,
+        event_type: 'diplomacy', title: '🌐 星海共同体成员', description: `贸易协定: ${parsed.diplomacy.trade_deals}, 附庸: ${parsed.diplomacy.subjects}`,
+        importance: 'major', game_key: 'galactic_community', raw_flag: 'galactic_community', raw_value: null,
+      });
     }
     if (allMilestones.length > 0) insertMilestones(allMilestones);
 

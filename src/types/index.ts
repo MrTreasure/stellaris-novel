@@ -37,6 +37,10 @@ export interface SaveRecord {
   species_traits: string | null;
   raw_json: string | null;
   uploaded_at: string;
+  fleet_power: number | null;
+  total_pops: number | null;
+  num_colonies: number | null;
+  active_wars: number | null;
 }
 
 export interface Milestone {
@@ -125,6 +129,26 @@ export interface ParsedSave {
   colonies?: { name: string; year: number }[];
   // Event chain detection fields
   rawFlags: { name: string; tick: number; scope: string }[];
+  // Enhanced extraction — Phase 1
+  population?: { total: number; factions: { name: string; size: number }[] };
+  planets?: { colonized: number; colonies: { name: string; type: string; pops: number }[] };
+  fleets?: { total_fleets: number; total_ships: number; total_power: number; notable: { name: string; ships: number; power: number }[] };
+  // Enhanced extraction — Phase 2
+  leaders?: { total: number; by_class: Record<string, number>; top: { name: string; class: string; level: number; traits: string[] }[] };
+  wars_detailed?: { active: number; list: { name: string; attacker: string; defender: string; goal?: string; exhaustion?: string }[] };
+  diplomacy?: { federation_name?: string; federation_size?: number; gc_member?: boolean; trade_deals: number; truces: number; rivals: number; subjects: number };
+  // Enhanced extraction — Phase 3
+  fired_events?: { total: number; recent: string[] };
+  archaeology?: { active: number; sites: { name: string; stage: number; total_stages: number }[] };
+  situations?: { count: number; list: { type: string; target?: string; progress?: number }[] };
+  event_targets?: { count: number };
+  player_choices?: { count: number };
+  // Enhanced extraction — Phase 4
+  infrastructure?: { sectors: number; buildings: Record<string, number>; total_districts: number };
+  espionage?: { active_ops: number };
+  resolutions?: { passed: number };
+  ground_combat?: { active_invasions: number };
+  map_objects?: { systems_owned: number; gateways: number; wormholes: number };
 }
 
 // ===== 事件链检测 =====

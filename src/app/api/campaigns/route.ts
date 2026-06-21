@@ -55,6 +55,10 @@ export async function POST(req: NextRequest) {
       species_name: parsed.empire_info.species_name || null,
       species_traits: JSON.stringify(parsed.empire_info.traits || []),
       raw_json: JSON.stringify(parsed),
+      fleet_power: parsed.fleets?.total_power || null,
+      total_pops: parsed.population?.total || null,
+      num_colonies: parsed.planets?.colonized || null,
+      active_wars: parsed.wars_detailed?.active || null,
     });
 
     // 插入里程碑

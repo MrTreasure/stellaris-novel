@@ -26,7 +26,13 @@ export async function GET(
     eventTypes[m.event_type] = (eventTypes[m.event_type] || 0) + 1;
   }
 
-  // Build event chain evidence from milestones
+  // Build event chain evidence from milestones + enriched save data
+  const latestSave = saves[saves.length - 1];
+  let rawParsed: any = null;
+  if (latestSave?.raw_json) {
+    try { rawParsed = JSON.parse(latestSave.raw_json); } catch {}
+  }
+
   const evidence: SaveEvidence = {
     countryFlags: new Set<string>(),
     globalFlags: new Set<string>(),
@@ -43,19 +49,29 @@ export async function GET(
   for (const m of milestones) {
     const flag = m.raw_flag || '';
     if (!flag) continue;
-    // Most flags from save-parser are country flags
     if (flag.startsWith('global_') || flag.includes('global_flag')) {
       evidence.globalFlags.add(flag);
     } else {
       evidence.countryFlags.add(flag);
     }
-    // Detect event IDs from raw flags
     if (flag.match(/\.\d+$/)) {
       evidence.firedEvents.push(flag);
     }
-    // Detect anomalies
     if (flag.startsWith('anomaly_') || flag.match(/^anomaly\./)) {
       evidence.completedAnomalies.push(flag);
+    }
+  }
+
+  // Enrich with real fired events from the parsed save
+  if (rawParsed?.fired_events?.recent) {
+    for (const eid of rawParsed.fired_events.recent) {
+      if (!evidence.firedEvents.includes(eid)) evidence.firedEvents.push(eid);
+    }
+  }
+  // Enrich with archaeology sites from parsed save
+  if (rawParsed?.archaeology?.sites) {
+    for (const site of rawParsed.archaeology.sites) {
+      evidence.archaeologySites.push({ name: site.name, currentStage: site.stage });
     }
   }
 
@@ -81,6 +97,10 @@ export async function GET(
         military_power: s.military_power,
         tech_power: s.tech_power,
         victory_rank: s.victory_rank,
+        fleet_power: s.fleet_power,
+        total_pops: s.total_pops,
+        num_colonies: s.num_colonies,
+        active_wars: s.active_wars,
       })),
     },
   });
