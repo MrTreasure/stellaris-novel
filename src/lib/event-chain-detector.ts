@@ -3,7 +3,7 @@
 
 import {
   getEventEdges, getNodeFlags, getAllEventChains, getEventChainNodes, getEventNode,
-  type EventNode, type EventEdge, type EventChain,
+  type EventChain,
 } from './db';
 
 export interface SaveEvidence {
@@ -51,6 +51,7 @@ function evaluateChain(
   chainNodes: { chain_id: string; node_id: string; stage_order: number; stage_type: string }[],
   evidence: SaveEvidence,
 ): DetectedEventChain | null {
+  if (chain.category === 'tutorial') return null;
   const observedNodes: string[] = [];
   const selectedChoices: string[] = [];
   const allFlags = new Set([
@@ -111,24 +112,40 @@ function evaluateChain(
   let status: DetectedEventChain['status'] = 'unknown';
   let currentStage = '';
 
-  // Check for known chain completion flags first
-  const startFlags = extractChainStartFlags(chain.chain_id);
+  const firstStageOrder = sortedNodes[0]?.stage_order;
+  const lastStageOrder = sortedNodes.at(-1)?.stage_order;
+  const startFlags = sortedNodes
+    .filter(node => node.stage_type === 'start' || node.stage_order === firstStageOrder)
+    .flatMap(node => getNodeFlags(node.node_id))
+    .filter(flag => flag.operation === 'set' || flag.operation === 'has')
+    .map(flag => flag.flag_name);
   const hasAnyFlag = startFlags.some(f => allFlags.has(f));
-  const completedFlags = extractChainCompletionFlags(chain.chain_id);
-  const hasCompletionFlag = completedFlags.some(f => allFlags.has(f));
+  const completedFlags = sortedNodes
+    .filter(node => node.stage_type === 'ending' || node.stage_order === lastStageOrder)
+    .flatMap(node => getNodeFlags(node.node_id))
+    .filter(flag => flag.operation === 'set' || flag.operation === 'has')
+    .map(flag => flag.flag_name);
+  const relatedFlags = chain.source === 'native' && sortedNodes.length > 0
+    ? findRelatedChainFlags(chain.chain_id, allFlags)
+    : [];
+  const hasCompletionFlag = completedFlags.some(f => allFlags.has(f))
+    || relatedFlags.some(isGenericCompletionFlag);
+  const hasRelatedFlag = relatedFlags.length > 0;
 
   if (hasCompletionFlag) {
     status = 'completed';
     currentStage = '已完成';
   } else if (observedNodes.length === 0 && sortedNodes.length === 0) {
-    if (!hasAnyFlag) return null;
+    if (!hasAnyFlag && !hasRelatedFlag) return null;
     status = 'active';
-    const matchedFlags = startFlags.filter(f => allFlags.has(f));
+    const matchedFlags = startFlags.filter(f => allFlags.has(f)).concat(relatedFlags);
     currentStage = matchedFlags.length > 0 ? `进行中 (${matchedFlags.length} 个标记)` : '进行中';
   } else if (observedNodes.length === 0 && sortedNodes.length > 0) {
-    if (!hasAnyFlag) return null;
+    if (!hasAnyFlag && !hasRelatedFlag) return null;
     status = 'active';
-    currentStage = '起始阶段';
+    currentStage = relatedFlags.length > 0
+      ? `已发现 ${relatedFlags.length} 个相关标记`
+      : '起始阶段';
   } else if (observedNodes.length > 0) {
     const lastStage = sortedNodes[sortedNodes.length - 1];
     const lastObserved = observedNodes[observedNodes.length - 1];
@@ -181,74 +198,28 @@ function evaluateChain(
   };
 }
 
-/** Extract completion flags for known chain types */
-function extractChainCompletionFlags(chainId: string): string[] {
-  const lower = chainId.toLowerCase();
-  const patterns: Record<string, string[]> = {
-    'yuht_chain': ['yuht_homeworld_found', 'yuht_finished'],
-    'vultaum_chain': ['vultaum_homeworld_found', 'vultaum_finished'],
-    'cybrex_chain': ['cybrex_homeworld_found', 'cybrex_finished'],
-    'first_league_chain': ['first_league_found', 'first_league_finished'],
-    'irassian_chain': ['irassian_homeworld_found', 'irassian_finished'],
-    'baol_chain': ['baol_finished', 'the_last_baol'],
-    'zroni_chain': ['zroni_finished'],
-    'great_khan': ['great_khan_dead', 'khan_dead'],
-    'prethoryn': ['prethoryn_defeated', 'scourge_defeated'],
-    'unbidden': ['unbidden_defeated'],
-    'contingency': ['contingency_defeated'],
-    'war_in_heaven': ['war_in_heaven_ended'],
-    'subterranean': ['subterranean_finished'],
-    'migrating_forests': ['migrating_forests_finished'],
-    'abandoned_terraforming': ['abandoned_terraforming_finished'],
-    'rubricator': ['rubricator_finished'],
-    'horizon_signal': ['horizon_signal_finished', 'worm_in_waiting_finished'],
-    'synth_queen': ['synth_queen_finished', 'synth_queen_defeated'],
-  };
-  if (patterns[lower]) return patterns[lower];
-  // Generic completion patterns
-  const base = lower.replace(/_chain$/, '');
-  return [`${base}_finished`, `${base}_completed`, `${base}_found`, `${base}_ended`, `${base}_defeated`];
+function findRelatedChainFlags(chainId: string, allFlags: Set<string>): string[] {
+  const ignored = new Set([
+    'chain', 'event', 'events', 'story', 'project', 'homeworld',
+    'situation', 'site', 'archaeology', 'special',
+  ]);
+  const tokens = chainId
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length >= 4 && !ignored.has(token));
+  if (tokens.length === 0) return [];
+
+  return [...allFlags].filter(flag => {
+    const normalized = flag.toLowerCase();
+    return tokens.some(token =>
+      normalized === token
+      || normalized.startsWith(`${token}_`)
+      || normalized.includes(`_${token}_`)
+      || normalized.endsWith(`_${token}`),
+    );
+  });
 }
 
-/** Extract likely flag names associated with a chain */
-function extractChainStartFlags(chainId: string): string[] {
-  const lower = chainId.toLowerCase();
-  // Common patterns:
-  // - yuht_chain → flag includes "yuht"
-  // - vultaum_chain → flag includes "vultaum"
-  // - great_khan → flag includes "great_khan"
-  const patterns: Record<string, string[]> = {
-    'yuht_chain': ['yuht'],
-    'vultaum_chain': ['vultaum'],
-    'irassian_chain': ['irassian'],
-    'cybrex_chain': ['cybrex'],
-    'first_league_chain': ['first_league'],
-    'baol_chain': ['baol'],
-    'zroni_chain': ['zroni'],
-    'great_khan': ['great_khan', 'khan', 'horde'],
-    'galactic_community': ['galactic_community', 'galcom', 'galactic_custodian'],
-    'galactic_market': ['galactic_market'],
-    'prethoryn': ['prethoryn', 'scourge'],
-    'unbidden': ['unbidden', 'extradimensional'],
-    'contingency': ['contingency', 'ai_rebellion'],
-    'war_in_heaven': ['war_in_heaven', 'awakened_empire'],
-    'synth_queen': ['synth_queen'],
-    'cosmic_storms': ['storm', 'cosmic_storm'],
-    'subterranean': ['subterranean'],
-    'migrating_forests': ['migrating_forest'],
-    'abandoned_terraforming': ['abandoned_terraforming'],
-    'rubricator': ['rubricator'],
-    'horizon_signal': ['horizon_signal', 'worm_in_waiting'],
-    'enigmatic_fortress': ['enigmatic_fortress'],
-    'dreadnought': ['dreadnought'],
-    'dimensional_horror': ['dimensional_horror', 'wormhole'],
-  };
-
-  // Try exact match
-  if (patterns[lower]) return patterns[lower];
-
-  // Try to extract meaningful parts from the chain ID
-  const parts = lower.replace(/_chain$/, '').split('_');
-  // Return all parts longer than 3 chars
-  return parts.filter(p => p.length >= 3 && !['the', 'and', 'for', 'with'].includes(p));
+function isGenericCompletionFlag(flag: string): boolean {
+  return /(?:^|_)(?:finished|completed|ended|defeated|homeworld_found)$/.test(flag.toLowerCase());
 }

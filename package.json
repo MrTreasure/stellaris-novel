@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:chronicle": "node --experimental-strip-types scripts/test-chronicle-filter.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.51",

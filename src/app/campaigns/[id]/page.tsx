@@ -178,7 +178,11 @@ function ChronicleByYear({ milestones, eventTagLabel, eventTagClass }: { milesto
   const groups = new Map<string, any[]>();
   const noDate: any[] = [];
   for (const m of milestones) {
-    if (!m.event_date || m.event_date.startsWith('0.') || m.event_date.startsWith('1.01')) continue;
+    if (!m.event_date) {
+      noDate.push(m);
+      continue;
+    }
+    if (m.event_date.startsWith('0.') || m.event_date.startsWith('1.01')) continue;
     const year = m.event_date.match(/^\d+/)?.[0] || m.event_date;
     if (year.length <= 2) { noDate.push(m); continue; }
     if (!groups.has(year)) groups.set(year, []);
@@ -211,7 +215,15 @@ function ChronicleByYear({ milestones, eventTagLabel, eventTagClass }: { milesto
                     <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${eventTagClass(m.event_type)}`}>
                       {eventTagLabel(m.event_type)}
                     </span>
-                    <p className={`text-sm leading-6 ${color}`}>{m.title}</p>
+                    <div className="min-w-0">
+                      <p className={`text-sm leading-6 ${color}`}>{m.title}</p>
+                      {m.chain_id && (
+                        <p className="mt-0.5 text-xs leading-5 text-[#7ca7a5]">
+                          {m.chain_id}{m.chain_stage ? ` · ${m.chain_stage}` : ''}
+                        </p>
+                      )}
+                      {m.description && <EventDescription text={m.description} />}
+                    </div>
                   </div>
                 );
               })}
@@ -229,13 +241,22 @@ function ChronicleByYear({ milestones, eventTagLabel, eventTagClass }: { milesto
                 <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${eventTagClass(m.event_type)}`}>
                   {eventTagLabel(m.event_type)}
                 </span>
-                <p className="text-sm leading-6 text-[#b2c3c2]">{m.title}</p>
+                <div className="min-w-0">
+                  <p className="text-sm leading-6 text-[#b2c3c2]">{m.title}</p>
+                  {m.description && <EventDescription text={m.description} />}
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function EventDescription({ text }: { text: string }) {
+  return (
+    <p className="mt-1 max-w-3xl whitespace-pre-line text-xs leading-5 text-[#789496]">{text}</p>
   );
 }
 
@@ -250,6 +271,8 @@ function eventTagLabel(type: string) {
     technology: '科技',
     tech: '科技',
     leader: '领袖',
+    military: '军事',
+    event: '事件',
   };
   return labels[type] || '事件';
 }
@@ -265,6 +288,7 @@ function eventTagClass(type: string) {
     technology: 'border-[#6d6193] bg-[#31264c]/60 text-[#c0ace9]',
     tech: 'border-[#6d6193] bg-[#31264c]/60 text-[#c0ace9]',
     leader: 'border-[#8c704c] bg-[#49341b]/60 text-[#dab878]',
+    military: 'border-[#8c704c] bg-[#49341b]/60 text-[#dab878]',
   };
   return classes[type] || 'border-[#496669] bg-[#173035]/60 text-[#9cb6b7]';
 }

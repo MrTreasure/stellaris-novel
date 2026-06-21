@@ -51,7 +51,12 @@ export function getDb() {
         zh_title TEXT,
         zh_description TEXT,
         file_path TEXT,
-        raw_text TEXT
+        raw_text TEXT,
+        hide_window INTEGER DEFAULT 0,
+        is_advisor INTEGER DEFAULT 0,
+        is_tutorial INTEGER DEFAULT 0,
+        is_initialization INTEGER DEFAULT 0,
+        player_only INTEGER DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS game_event_edges (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +89,17 @@ export function getDb() {
         stage_type TEXT DEFAULT 'progress',
         PRIMARY KEY (chain_id, node_id)
       );
+    `);
+    const eventNodeColumns = _db.prepare('PRAGMA table_info(game_event_nodes)').all();
+    for (const name of ['hide_window', 'is_advisor', 'is_tutorial', 'is_initialization', 'player_only']) {
+      if (!eventNodeColumns.some(column => column.name === name)) {
+        _db.exec(`ALTER TABLE game_event_nodes ADD COLUMN ${name} INTEGER DEFAULT 0`);
+      }
+    }
+    _db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_event_flags_name ON game_event_flags(flag_name);
+      CREATE INDEX IF NOT EXISTS idx_event_flags_node ON game_event_flags(node_id);
+      CREATE INDEX IF NOT EXISTS idx_chain_nodes_node ON game_event_chain_nodes(node_id);
     `);
   }
   return _db;

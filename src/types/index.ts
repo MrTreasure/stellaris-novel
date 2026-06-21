@@ -55,6 +55,13 @@ export interface Milestone {
   game_key: string | null;
   raw_flag: string | null;
   raw_value: string | null;
+  source_node_id?: string | null;
+  chain_id?: string | null;
+  chain_stage?: string | null;
+  data_source?: string | null;
+  resolution_confidence?: number | null;
+  relevance?: 'include' | 'context' | 'exclude' | null;
+  relevance_reason?: string | null;
 }
 
 // ===== 小说相关 =====
@@ -113,6 +120,7 @@ export interface ParsedSave {
     category: string;
     approx_date: string;
     key?: string;
+    scope?: string;
   }[];
   crisis_encounters: { id: string; description: string }[];
   key_technologies: { id: string; description: string }[];
@@ -128,7 +136,7 @@ export interface ParsedSave {
   }[];
   colonies?: { name: string; year: number }[];
   // Event chain detection fields
-  rawFlags: { name: string; tick: number; scope: string }[];
+  rawFlags: { name: string; tick: number; scope: string; player_owned?: boolean }[];
   // Enhanced extraction — Phase 1
   population?: { total: number; factions: { name: string; size: number }[] };
   planets?: { colonized: number; colonies: { name: string; type: string; pops: number }[] };

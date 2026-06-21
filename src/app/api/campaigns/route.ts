@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     try {
       const { parseSaveBuffer } = await import('@/lib/parser/save-parser');
       const parsed = parseSaveBuffer(buffer);
+      // Buffer will be GC'd when scope exits; parseSaveBuffer releases internal ZIP refs
 
     // 获取或创建战役
     const campaignName = formData.get('campaign_name')?.toString() || `${parsed.empire_name}战役`;

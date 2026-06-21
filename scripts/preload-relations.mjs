@@ -184,6 +184,12 @@ export function syncRelations(db, { changed, isFirst }) {
     const normId = normalizeId(id);
     if (!normId || nodeSet.has(`${nodeType}:${normId}`)) return;
     nodeSet.add(`${nodeType}:${normId}`);
+    const serialized = rawText || '';
+    const tutorial = filePath?.toLowerCase().includes('tutorial') || serialized.includes('"is_tutorial":true');
+    const advisor = serialized.includes('"is_advisor_event":true') || filePath?.toLowerCase().includes('advisor_events');
+    const initialization = filePath?.toLowerCase().endsWith('/game_start.txt')
+      || serialized.includes('"on_game_start"')
+      || serialized.includes('"on_game_start_country"');
     nodes.push({
       id: normId,
       node_type: nodeType,
@@ -192,7 +198,12 @@ export function syncRelations(db, { changed, isFirst }) {
       zh_title: localName(loc, titleKey || id) || localName(loc, id) || null,
       zh_description: localDesc(loc, descKey || id) || null,
       file_path: filePath || null,
-      raw_text: (rawText || '').slice(0, 8000),
+      raw_text: serialized.slice(0, 8000),
+      hide_window: serialized.includes('"hide_window":true') ? 1 : 0,
+      is_advisor: advisor ? 1 : 0,
+      is_tutorial: tutorial ? 1 : 0,
+      is_initialization: initialization ? 1 : 0,
+      player_only: serialized.includes('"is_ai":false') ? 1 : 0,
     });
   }
 
@@ -534,6 +545,11 @@ export function syncRelations(db, { changed, isFirst }) {
                     zh_description: null,
                     file_path: `common/event_chains/${f}`,
                     raw_text: null,
+                    hide_window: 0,
+                    is_advisor: 0,
+                    is_tutorial: f.toLowerCase().includes('tutorial') ? 1 : 0,
+                    is_initialization: 0,
+                    player_only: 0,
                   });
                 }
                 // Add flag: has the counter flag
@@ -578,6 +594,14 @@ export function syncRelations(db, { changed, isFirst }) {
       category,
       root_node_id: null,
       source: 'connected',
+    });
+    eventIds.forEach((eventId, index) => {
+      chainNodes.push({
+        chain_id: cleanId,
+        node_id: normalizeId(eventId),
+        stage_order: index + 1,
+        stage_type: index === 0 ? 'start' : (index === eventIds.length - 1 ? 'ending' : 'progress'),
+      });
     });
   }
 

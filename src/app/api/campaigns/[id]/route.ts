@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCampaign, getSaves, getMilestones, getChapters, getNovels, getAllEventChains, getEventChainNodes } from '@/lib/db';
+import { getCampaign, getSaves, getChapters, getNovels } from '@/lib/db';
 import { getDb } from '@/lib/db';
-import { localizeMilestoneTitle, loadLocMap } from '@/lib/flags';
 import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
-import { isNoiseFlag, loadKnownFlags } from '@/lib/noise-filter';
+import { getResolvedCampaignMilestones } from '@/lib/chronicle-query';
+import type { ParsedSave } from '@/types';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -18,14 +18,8 @@ export async function GET(
 
   const saves = getSaves(campaignId);
   const db = getDb();
-  loadLocMap(db); // pre-load localisation for fast flag translation
-  loadKnownFlags(db); // pre-load known flags for noise filtering
-  const milestones = getMilestones(campaignId)
-    .filter(m => !m.raw_flag || !isNoiseFlag(m.raw_flag))
-    .map(milestone => ({
-      ...milestone,
-      title: localizeMilestoneTitle(milestone.raw_flag, milestone.title, db),
-    }));
+  const includeContext = req.nextUrl.searchParams.get('diagnostics') === '1';
+  const milestones = getResolvedCampaignMilestones(db, campaignId, saves, { includeContext });
   const eventTypes: Record<string, number> = {};
   for (const m of milestones) {
     eventTypes[m.event_type] = (eventTypes[m.event_type] || 0) + 1;
@@ -33,7 +27,7 @@ export async function GET(
 
   // Build event chain evidence from milestones + enriched save data
   const latestSave = saves[saves.length - 1];
-  let rawParsed: any = null;
+  let rawParsed: ParsedSave | null = null;
   if (latestSave?.raw_json) {
     try { rawParsed = JSON.parse(latestSave.raw_json); } catch {}
   }
@@ -72,7 +66,7 @@ export async function GET(
     for (const rf of rawParsed.rawFlags) {
       if (rf.scope === 'global' || rf.name.startsWith('global_')) {
         evidence.globalFlags.add(rf.name);
-      } else {
+      } else if (rf.player_owned === true || (rf.player_owned === undefined && rf.scope === 'country')) {
         evidence.countryFlags.add(rf.name);
       }
     }

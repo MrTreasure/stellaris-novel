@@ -80,7 +80,14 @@ function runMigrations(db: DatabaseSync) {
       importance TEXT,
       game_key TEXT,
       raw_flag TEXT,
-      raw_value TEXT
+      raw_value TEXT,
+      source_node_id TEXT,
+      chain_id TEXT,
+      chain_stage TEXT,
+      data_source TEXT,
+      resolution_confidence INTEGER,
+      relevance TEXT,
+      relevance_reason TEXT
     );
 
     CREATE TABLE IF NOT EXISTS novels (
@@ -179,7 +186,12 @@ function runMigrations(db: DatabaseSync) {
       zh_title TEXT,
       zh_description TEXT,
       file_path TEXT,
-      raw_text TEXT
+      raw_text TEXT,
+      hide_window INTEGER DEFAULT 0,
+      is_advisor INTEGER DEFAULT 0,
+      is_tutorial INTEGER DEFAULT 0,
+      is_initialization INTEGER DEFAULT 0,
+      player_only INTEGER DEFAULT 0
     );
 
     -- 事件关系图: 边 (option/trigger/immediate/after/on_success/on_fail/on_action)
@@ -220,6 +232,10 @@ function runMigrations(db: DatabaseSync) {
       stage_type TEXT DEFAULT 'progress',
       PRIMARY KEY (chain_id, node_id)
     );
+
+    CREATE INDEX IF NOT EXISTS idx_event_flags_name ON game_event_flags(flag_name);
+    CREATE INDEX IF NOT EXISTS idx_event_flags_node ON game_event_flags(node_id);
+    CREATE INDEX IF NOT EXISTS idx_chain_nodes_node ON game_event_chain_nodes(node_id);
   `);
 
   // 旧数据库按需补列；CREATE TABLE 已包含该列，新数据库不会重复执行。
@@ -234,6 +250,31 @@ function runMigrations(db: DatabaseSync) {
   for (const col of saveColNames) {
     if (!saveColumns.some(c => c.name === col)) {
       db.exec(`ALTER TABLE saves ADD COLUMN ${col} INTEGER DEFAULT 0`);
+    }
+  }
+
+  const milestoneColumns = db.prepare('PRAGMA table_info(milestones)').all() as { name: string }[];
+  const milestoneAdditions: [string, string][] = [
+    ['source_node_id', 'TEXT'],
+    ['chain_id', 'TEXT'],
+    ['chain_stage', 'TEXT'],
+    ['data_source', 'TEXT'],
+    ['resolution_confidence', 'INTEGER'],
+    ['relevance', 'TEXT'],
+    ['relevance_reason', 'TEXT'],
+  ];
+  for (const [name, type] of milestoneAdditions) {
+    if (!milestoneColumns.some(column => column.name === name)) {
+      db.exec(`ALTER TABLE milestones ADD COLUMN ${name} ${type}`);
+    }
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_milestones_campaign_relevance ON milestones(campaign_id, relevance)');
+
+  const eventNodeColumns = db.prepare('PRAGMA table_info(game_event_nodes)').all() as { name: string }[];
+  const eventNodeAdditions = ['hide_window', 'is_advisor', 'is_tutorial', 'is_initialization', 'player_only'];
+  for (const name of eventNodeAdditions) {
+    if (!eventNodeColumns.some(column => column.name === name)) {
+      db.exec(`ALTER TABLE game_event_nodes ADD COLUMN ${name} INTEGER DEFAULT 0`);
     }
   }
 
@@ -348,12 +389,22 @@ export function getMilestones(campaignId: number): Milestone[] {
 export function insertMilestones(milestones: Omit<Milestone, 'id'>[]) {
   const d = getDb();
   const stmt = d.prepare(`
-    INSERT INTO milestones (save_id, campaign_id, event_date, event_type, title, description, importance, game_key, raw_flag, raw_value)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO milestones (
+      save_id, campaign_id, event_date, event_type, title, description, importance,
+      game_key, raw_flag, raw_value, source_node_id, chain_id, chain_stage,
+      data_source, resolution_confidence, relevance, relevance_reason
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const m of milestones) {
     try {
-      stmt.run(m.save_id, m.campaign_id, m.event_date, m.event_type, m.title, m.description, m.importance, m.game_key, m.raw_flag, m.raw_value);
+      stmt.run(
+        m.save_id, m.campaign_id, m.event_date, m.event_type, m.title, m.description,
+        m.importance, m.game_key, m.raw_flag, m.raw_value,
+        m.source_node_id ?? null, m.chain_id ?? null, m.chain_stage ?? null,
+        m.data_source ?? null, m.resolution_confidence ?? null,
+        m.relevance ?? 'include', m.relevance_reason ?? null,
+      );
     } catch {
       // 跳过异常
     }

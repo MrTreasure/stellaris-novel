@@ -1,10 +1,11 @@
 import { NextRequest } from 'next/server';
-import { getCampaign, getSaves, getMilestones } from '@/lib/db';
+import { getCampaign, getSaves, getDb } from '@/lib/db';
 import { completeChat, streamChat } from '@/lib/ai-client';
 import type { ContinuityBible } from '@/lib/browser-storage';
 import { loadLore } from '@/lib/lore';
 import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
 import { novelTools } from '@/lib/ai-tools';
+import { getResolvedCampaignMilestones } from '@/lib/chronicle-query';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
 function buildPrompt(campaignId: number): { system: string; intro: string } {
   const campaign = getCampaign(campaignId);
   const saves = getSaves(campaignId);
-  const milestones = getMilestones(campaignId);
+  const milestones = getResolvedCampaignMilestones(getDb(), campaignId, saves);
   const latestSave = saves.at(-1);
 
   const empireInfo = latestSave ? {

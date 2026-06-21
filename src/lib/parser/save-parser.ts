@@ -3,7 +3,6 @@
 
 import AdmZip from 'adm-zip';
 import type { ParsedSave } from '@/types';
-import { isNoiseFlag } from '@/lib/noise-filter';
 
 // ===== 工具函数 =====
 
@@ -85,15 +84,17 @@ export function parseSaveFile(filePath: string): ParsedSave {
 }
 
 function parseSaveZip(zip: AdmZip): ParsedSave {
+  // Read both entries immediately — we don't need the ZIP object after this
   const metaEntry = zip.getEntry('meta');
   if (!metaEntry) throw new Error('存档文件缺少 meta 数据');
   const metaText = metaEntry.getData().toString('utf8');
-  const metaInfo: Record<string, string> = {};
-  for (const line of metaText.split('\n')) { const m = line.match(/(\w+)="([^"]+)"/); if (m) metaInfo[m[1]] = m[2]; }
 
   const gsEntry = zip.getEntry('gamestate');
   if (!gsEntry) throw new Error('存档文件缺少 gamestate');
   const data = gsEntry.getData();
+  // zip can be GC'd from here — metaText and data are independent Buffers/strings
+  const metaInfo: Record<string, string> = {};
+  for (const line of metaText.split('\n')) { const m = line.match(/(\w+)="([^"]+)"/); if (m) metaInfo[m[1]] = m[2]; }
 
   const gameDate = metaInfo['date'] || '?';
   let empireName = metaInfo['name'] || '?';
@@ -157,35 +158,39 @@ function findPlayerCountry(data: Buffer): { csPos: number | null; cePos: number 
     const m = playerSection.match(/country\s*=\s*(\d+)/);
     if (m) playerCountryId = m[1];
   }
-  // Search for country section - PDS format varies by version
-  let countrySec = data.indexOf(Buffer.from('\ncountry={'));
-  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\ncountry=\n{'));
-  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\r\ncountry={'));
-  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('\tcountry={'));
-  if (countrySec < 0) countrySec = data.indexOf(Buffer.from('country={'));  // anywhere
-  if (countrySec < 0) {
-    // Corvus 4.2.x and newer: country data may be in a different structure
-    // Fall back to searching the entire file for player country section
-    return { ...findPlayerCountryByScan(data, playerCountryId), playerCountryId };
-  }
-  if (countrySec < 0) return { csPos: null, cePos: null, playerCountryId };
-  const cbs = data.indexOf(Buffer.from('{'), countrySec + 8);
-  if (cbs < 0) return { csPos: null, cePos: null, playerCountryId };
-  const cbe = findBlockEnd(data, cbs + 1);
+  // Several unrelated nested blocks also contain a "country" key. Walk candidates
+  // until the block that actually contains the player's numeric country record.
+  const countryKey = Buffer.from('country=');
+  const playerPattern = new RegExp(`(?:^|\\n)\\s*${playerCountryId}\\s*=\\s*\\{`);
+  let searchPos = 0;
+  let candidatesChecked = 0;
+  while (searchPos < data.length && candidatesChecked < 200) {
+    const countrySec = data.indexOf(countryKey, searchPos);
+    if (countrySec < 0) break;
+    searchPos = countrySec + countryKey.length;
+    candidatesChecked++;
 
-  const countryText = data.subarray(cbs + 1, cbe - 1).toString('latin1');
-  const playerPattern = new RegExp(`(?:^|\\n)\\s*${playerCountryId}=\\s*\\{`);
-  const match = playerPattern.exec(countryText);
-  if (match) {
+    let before = countrySec - 1;
+    while (before >= 0 && (data[before] === 0x20 || data[before] === 0x09)) before--;
+    if (before >= 0 && data[before] !== 0x0a && data[before] !== 0x0d) continue;
+
+    const cbs = data.indexOf(0x7b, countrySec + countryKey.length);
+    if (cbs < 0 || cbs - countrySec > 32) continue;
+    const cbe = findBlockEnd(data, cbs + 1);
+    if (cbe <= cbs) continue;
+
+    const countryText = data.subarray(cbs + 1, cbe - 1).toString('latin1');
+    const match = playerPattern.exec(countryText);
+    if (!match) continue;
     const relativeBrace = match.index + match[0].lastIndexOf('{');
     const ss = cbs + 1 + relativeBrace;
     const se = findBlockEnd(data, ss + 1);
-    return { csPos: cbs + 1 + match.index, cePos: se, playerCountryId };
+    return { csPos: ss, cePos: se, playerCountryId };
   }
-  return { csPos: null, cePos: null, playerCountryId };
+  return { ...findPlayerCountryByScan(data), playerCountryId };
 }
 
-function findPlayerCountryByScan(data: Buffer, playerId: string): { csPos: number | null; cePos: number | null } {
+function findPlayerCountryByScan(data: Buffer): { csPos: number | null; cePos: number | null } {
   // Corvus 4.x+ fallback: search for player country flags by looking for empire_size or any known flag
   // Use a wider search range - the player's data is typically in the first 30% of the file
   const scanEnd = Math.floor(data.length * 0.3);
@@ -252,8 +257,8 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
   const searchEnd = cePos ?? data.length;
 
   // Try Butler v2.x format: central flags={...} block
-  let flagsPos = data.indexOf(Buffer.from('flags={'), searchStart);
-  let rawFlags: { name: string; tick: number }[] = [];
+  const flagsPos = data.indexOf(Buffer.from('flags={'), searchStart);
+  let rawFlags: { name: string; tick: number; playerOwned: boolean }[] = [];
 
   if (flagsPos >= 0 && flagsPos < searchEnd) {
     const flagsEnd = findBlockEnd(data, flagsPos + 6);
@@ -261,7 +266,13 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
       const text = data.subarray(flagsPos, flagsEnd).toString('ascii');
       for (const m of text.matchAll(/\n(\w+)\s*=\s*(\d{7,9})/g)) {
         const name = m[1], tick = parseInt(m[2]);
-        if (tick > 60000000 && tick < 70000000) rawFlags.push({ name, tick });
+        if (tick > 60000000 && tick < 70000000) {
+          rawFlags.push({
+            name,
+            tick,
+            playerOwned: csPos !== null && flagsPos >= csPos && flagsPos < (cePos ?? data.length),
+          });
+        }
       }
     }
   }
@@ -282,7 +293,7 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
         const name = m[1], tick = parseInt(m[2]);
         if (tick > 60000000 && tick < 70000000 && !seen.has(name)) {
           seen.add(name);
-          rawFlags.push({ name, tick });
+          rawFlags.push({ name, tick, playerOwned: false });
           if (rawFlags.length >= 2000) break; // safety limit
         }
       }
@@ -296,67 +307,26 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
         const name = m[1], tick = parseInt(m[2]);
         if (tick > 60000000 && tick < 70000000 && !seen.has(name)) {
           seen.add(name);
-          rawFlags.push({ name, tick });
+          rawFlags.push({ name, tick, playerOwned: true });
           if (rawFlags.length >= 2000) break;
         }
       }
     }
   }
 
+  const dedupedFlags = new Map<string, { name: string; tick: number; playerOwned: boolean }>();
+  for (const flag of rawFlags) {
+    const existing = dedupedFlags.get(flag.name);
+    if (!existing || (!existing.playerOwned && flag.playerOwned)) dedupedFlags.set(flag.name, flag);
+  }
+  rawFlags = [...dedupedFlags.values()];
+
   const SKIP = new Set(['flag_date','flag_days','country','id','tick','type','none',
     'sector','planet','army','fleet','ship','pop','species_index',
     'random','graphical_culture','capital_scope','synced_random_seed']);
-  rawFlags = rawFlags.filter(f => !SKIP.has(f.name) && f.name.length >= 3 && !/^\d+$/.test(f.name)
-    // Filter out system/planet initialization markers (not player milestones)
-    && !f.name.startsWith('planet_')
-    && !f.name.startsWith('fallen_empire_')
-    && !f.name.startsWith('fallen_hive_')
-    && !f.name.startsWith('fe_the_')
-    && !f.name.startsWith('forgotten_patrol_')
-    && !f.name.startsWith('machine_world_')
-    && !f.name.startsWith('guardians_')
-    && !f.name.endsWith('_enclave_planet')
-    && !f.name.startsWith('raid_')
-    && !f.name.startsWith('prescripted_')
-    && !f.name.match(/^(tasty|toxic|ancient_history|war_citadel)/)
-  );
-
-  // Use shared noise filter
-  rawFlags = rawFlags.filter(f => !isNoiseFlag(f.name));
+  rawFlags = rawFlags.filter(f => !SKIP.has(f.name) && f.name.length >= 3 && !/^\d+$/.test(f.name));
   // Filter flags with abnormal tick values (>66M = game engine internals, not event dates)
   rawFlags = rawFlags.filter(f => f.tick <= 66000000);
-
-  const catRules: [string, string][] = [
-    ['built_','megastructure'],['started_first_','megastructure'],['finished_','megastructure'],
-    ['has_won_war','war'],['has_conquer_','war'],
-    ['first_colony','colonization'],['colony_','colonization'],
-    ['encountered_first_','exploration'],['discovered_','exploration'],
-    ['anomaly_','exploration'],['archaeolog','exploration'],
-    ['surveyed_','exploration'],['completed_','exploration'],
-    ['triggered_','event'],['story','event'],
-    ['crisis_','crisis'],['machine_','crisis'],
-    ['achievement_','achievement'],
-    ['first_contact','diplomacy'],['has_communications','diplomacy'],['established_comms','diplomacy'],
-    ['has_market','economy'],
-    ['gateway_','megastructure'],['lgate','exploration'],
-    ['colossus_','military'],['fired_','military'],
-    ['edict_','policy'],['specimens_','collection'],
-    ['has_modified','science'],['pop_mod','science'],
-    ['found_presapients','exploration'],['living_planet','exploration'],
-    ['exotic_gases','resource'],['rare_crystals','resource'],
-    ['volatile_motes','resource'],['dark_matter','resource'],['zro_','resource'],
-    ['precursor_','exploration'],['first_precursor','exploration'],
-    ['ruined_','exploration'],['caravan','diplomacy'],
-    ['galactic_community','diplomacy'],['galcom','diplomacy'],
-    ['federation_','diplomacy'],['in_diplomacy','diplomacy'],
-    ['establish_','diplomacy'],['met_fallen_','diplomacy'],
-    ['leviathan_','exploration'],['enigmatic_','exploration'],
-    ['dreadnought','military'],['stellarite','military'],
-    ['shroud_','event'],['khan_','crisis'],['horde_','crisis'],
-    ['bemat_','exploration'],['worm_','exploration'],
-    ['destroyer_','exploration'],
-  ];
-  function cat(name: string): string { for (const [p,c] of catRules) if (name.startsWith(p)) return c; return 'other'; }
 
   const tickBase = 62800000;
 
@@ -364,12 +334,19 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
   result.rawFlags = rawFlags.map(rf => ({
     name: rf.name,
     tick: rf.tick,
-    scope: 'country', // Most flags from this extraction are country-level
+    scope: rf.playerOwned ? 'country' : 'unknown',
+    player_owned: rf.playerOwned,
   }));
 
   for (const rf of rawFlags) {
     const year = Math.round(2200 + (rf.tick - tickBase) / 8350);
-    result.timeline_events.push({ event: rf.name, category: cat(rf.name), approx_date: year.toString(), key: rf.name });
+    result.timeline_events.push({
+      event: rf.name,
+      category: 'event',
+      approx_date: year.toString(),
+      key: rf.name,
+      scope: rf.playerOwned ? 'player_country' : 'unknown',
+    });
   }
 }
 
