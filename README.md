@@ -7,9 +7,9 @@
 - **Next.js 16** (App Router, TypeScript, Tailwind CSS)
 - **SQLite** (Node.js 内置 `node:sqlite`, 零外部依赖)
 - **纯 Node.js Buffer 解析** (直接操作 Buffer 解析 PDS 格式, 无磁盘写入)
-- **Vercel AI SDK v6** (非流式调用) + **原始 SSE fetch** (流式生成, DeepSeek 兼容)
-- **OpenAI 兼容 API** (DeepSeek V4 / Claude / GPT / Ollama)
-- **IndexedDB** (idb-keyval, 数百MB 浏览器存储)
+- **Vercel AI SDK v6** (`ai` + `@ai-sdk/openai`, `provider.chat()` → `/chat/completions`)
+- **DeepSeek V4 API** (1M token 上下文, 兼容 OpenAI Chat Completions 协议)
+- **IndexedDB** (`idb-keyval`, 数百MB 浏览器存储)
 
 ## 快速开始
 
@@ -50,14 +50,16 @@ npm run dev                     # http://localhost:3000
 ### AI 生成流水线
 
 ```
-首次进入 → 自动生成章节大纲 → 存储 IndexedDB
-每次生成 → 全量 messages 提交 (1M token 上下文)
-         → 大纲注入 + 连续性档案 + 最近一章摘要
-         → SSE 流式返回文本块
+首次进入 → 自动生成章节大纲 → 流式返回 + 弹窗实时展示 → 存储 IndexedDB
+每次生成 → 全量 messages 提交 (1M token 上下文, >500K 滑动窗口)
+         → 大纲注入 + 连续性档案 + campaign_id 明确标注
+         → AI SDK streamText + 8 个工具自动调用循环
+         → NDJSON 流式返回文本块 + 工具调用事件
+         → 右侧面板展示生成阶段 + 工具调用次数
          → AI 连续性编辑 → 更新档案
 ```
 
-提示词预览对话框可编辑, 大纲可重新生成。
+AI 可自动调用 8 个 SQLite 查询工具：本地化查找、事件/flag 查询、特质/理念/伦理查询、战役事实查询、事件链进度查询、通用知识搜索、事件链定义查询、科技查询。工具支持多关键词分词搜索和事件链 ID 模糊匹配（自动处理前缀/后缀变体）。
 
 ## 项目结构
 
@@ -66,6 +68,7 @@ stellaris-novel/
 ├── docs/
 │   ├── architecture.md              # 技术架构文档
 │   ├── event-chain-enhancement.md   # 事件链增强计划
+│   ├── ai-streaming-sqlite-plan.md  # AI SDK 集成计划
 │   └── stellaris-lore.md            # 群星世界观 (AI prompt)
 ├── scripts/                         # 离线工具 (Node.js ESM)
 │   ├── preload-all.mjs              # 数据同步入口
@@ -77,6 +80,8 @@ stellaris-novel/
 │   ├── preload-traditions.mjs       # 传统树导入
 │   ├── test-pipeline.mjs            # 事件链测试
 │   ├── test-chronicle-filter.mjs    # 编年史过滤测试
+│   ├── test-enriched-parse.mjs      # SAV 解析器集成测试
+│   ├── test-tool-calls.mjs          # AI 工具调用调试脚本
 │   ├── pds-parser.mjs               # PDS 解析器 (Node.js)
 │   └── shared.mjs                   # 共享工具
 ├── src/
@@ -85,21 +90,23 @@ stellaris-novel/
 │   │   ├── layout.tsx               # 全局布局 (Stellaris背景图)
 │   │   ├── campaigns/[id]/
 │   │   │   ├── page.tsx             # 战役详情 (编年史+事件链+统计)
-│   │   │   └── novel/page.tsx       # 小说工程 (大纲+生成+档案)
+│   │   │   └── novel/page.tsx       # 小说工程 (大纲流式+生成+档案+章节管理)
 │   │   ├── settings/page.tsx        # AI 配置
 │   │   └── api/
 │   │       ├── campaigns/           # 战役 CRUD + 事件链检测
 │   │       ├── saves/               # 上传解析 + 里程碑生成 (Buffer, 无磁盘IO)
-│   │       ├── novels/generate/     # 小说生成 (SSE流式 + 大纲)
+│   │       ├── novels/generate/     # 小说生成 (NDJSON流式 + 工具调用)
+│   │       │   └── outline/         # 大纲生成 (流式)
 │   │       └── test-ai/             # AI 连接测试
 │   ├── lib/
 │   │   ├── db.ts                    # SQLite 数据库层
-│   │   ├── ai-client.ts             # AI 客户端 (raw fetch SSE + AI SDK)
-│   │   ├── ai-tools.ts              # AI 工具 (3个SQLite查询)
+│   │   ├── ai-client.ts             # AI SDK 客户端 (streamText + provider.chat)
+│   │   ├── ai-tools.ts              # AI 工具定义 (8个只读SQLite查询)
 │   │   ├── chronicle-resolver.ts    # 编年史解析 (flag→节点→链)
 │   │   ├── chronicle-builder.ts     # 编年史构建 (ParsedSave→milestones)
 │   │   ├── chronicle-query.ts       # 编年史查询 (动态生成+DB回退)
 │   │   ├── event-chain-detector.ts  # 事件链状态识别
+│   │   ├── novel-facts.ts           # 战役事实聚合层
 │   │   ├── browser-storage.ts       # IndexedDB 存储
 │   │   ├── lore.ts                  # 世界观加载
 │   │   └── parser/
@@ -130,9 +137,9 @@ stellaris-novel/
 ## 配置 AI 服务
 
 1. 访问 `/settings` → 填入 API Key / Base URL / Model
-2. 默认 model: `deepseek-v4-pro`
+2. 默认 model: `deepseek-v4-pro`, 默认 Base URL: `https://api.deepseek.com`
 3. 点击测试连接确认可用
-4. 配置仅存浏览器 localStorage, 不写服务端
+4. 配置仅存浏览器 IndexedDB, 不写服务端
 
 ## 数据同步
 
@@ -145,12 +152,14 @@ node scripts/preload-all.mjs       # 游戏升级后增量同步
 ## 测试
 
 ```bash
-node scripts/test-pipeline.mjs        # 事件链全链路
+node scripts/test-pipeline.mjs         # 事件链全链路
 node scripts/test-chronicle-filter.mjs # 编年史过滤
+node scripts/test-enriched-parse.mjs   # SAV 解析器集成测试
+node scripts/test-tool-calls.mjs       # AI 工具调用调试
 ```
 
 ## 环境要求
 
 - Node.js 24+ (`node:sqlite`)
 - 群星游戏安装目录 (离线预加载用, 运行时无需访问)
-- OpenAI 兼容 API Key
+- DeepSeek API Key (或任意 OpenAI 兼容 API)
