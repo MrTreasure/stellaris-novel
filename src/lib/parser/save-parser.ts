@@ -75,8 +75,16 @@ function findBlockEnd(data: Buffer, start: number): number {
 
 // ===== 主解析函数 =====
 
+/** Parse a .sav file from a Buffer (no disk write needed) */
+export function parseSaveBuffer(buffer: Buffer): ParsedSave {
+  return parseSaveZip(new AdmZip(buffer));
+}
+
 export function parseSaveFile(filePath: string): ParsedSave {
-  const zip = new AdmZip(filePath);
+  return parseSaveZip(new AdmZip(filePath));
+}
+
+function parseSaveZip(zip: AdmZip): ParsedSave {
   const metaEntry = zip.getEntry('meta');
   if (!metaEntry) throw new Error('存档文件缺少 meta 数据');
   const metaText = metaEntry.getData().toString('utf8');

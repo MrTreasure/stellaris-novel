@@ -18,15 +18,11 @@ export async function POST(req: NextRequest) {
     if (!file.name.endsWith('.sav')) return NextResponse.json({ error: '仅支持 .sav 格式' }, { status: 400 });
     if (file.size > 200 * 1024 * 1024) return NextResponse.json({ error: '文件过大' }, { status: 400 });
 
-    const safeName = path.basename(file.name.replace(/[^a-zA-Z0-9_.-]/g, '_'));
-    const tmpDir = path.join(process.cwd(), 'data', 'tmp');
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const tmpPath = path.join(tmpDir, safeName);
     const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(tmpPath, buffer);
 
     try {
-      const parsed = parseSaveFile(tmpPath);
+      const { parseSaveBuffer } = await import('@/lib/parser/save-parser');
+      const parsed = parseSaveBuffer(buffer);
 
     // 获取或创建战役
     const campaignName = formData.get('campaign_name')?.toString() || `${parsed.empire_name}战役`;
@@ -105,8 +101,6 @@ export async function POST(req: NextRequest) {
     });
     } catch (e: any) {
       return NextResponse.json({ error: '存档解析失败' }, { status: 500 });
-    } finally {
-      try { fs.unlinkSync(tmpPath); } catch {}
     }
   } catch (e: any) {
     return NextResponse.json({ error: '服务器内部错误' }, { status: 500 });

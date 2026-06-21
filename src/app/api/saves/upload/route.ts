@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { parseSaveFile } from '@/lib/parser/save-parser';
+import { parseSaveBuffer } from '@/lib/parser/save-parser';
 import { createCampaign, getCampaigns, insertSave, insertMilestones, updateCampaignDates, getDb } from '@/lib/db';
 import { flagToTitle, loadLocMap } from '@/lib/flags';
 import { loadKnownFlags } from '@/lib/noise-filter';
@@ -52,13 +52,7 @@ export async function POST(req: NextRequest) {
     if (!file.name.endsWith('.sav')) return NextResponse.json({ error: '仅支持 .sav 格式的存档文件' }, { status: 400 });
     if (file.size > 200 * 1024 * 1024) return NextResponse.json({ error: '存档文件过大 (最大 200MB)' }, { status: 400 });
 
-    // Save to temp (sanitize filename to prevent path traversal)
-    const safeName = path.basename(file.name.replace(/[^a-zA-Z0-9_.-]/g, '_'));
-    const tmpDir = path.join(process.cwd(), 'data', 'tmp');
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const tmpPath = path.join(tmpDir, safeName);
     const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(tmpPath, buffer);
 
     // Pre-load known flags from event graph for whitelist-based noise filtering
     const db = getDb();
@@ -66,8 +60,8 @@ export async function POST(req: NextRequest) {
     loadLocMap(db);
 
     try {
-      // 解析
-      const parsed = parseSaveFile(tmpPath);
+      // Parse directly from Buffer (no temp file on disk)
+      const parsed = parseSaveBuffer(buffer);
 
       // 创建或找战役
       const campaignName = formData.get('campaign_name')?.toString() || `${parsed.empire_name}战役`;
@@ -261,8 +255,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, campaign_id: campaignId, save_id: saveId, parsed });
     } catch (e: any) {
       return NextResponse.json({ error: '存档解析失败，请检查文件完整性' }, { status: 500 });
-    } finally {
-      try { fs.unlinkSync(tmpPath); } catch {}
     }
   } catch (e: any) {
     return NextResponse.json({ error: '服务器内部错误' }, { status: 500 });
