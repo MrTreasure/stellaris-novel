@@ -95,6 +95,7 @@ export function parseSaveFile(filePath: string): ParsedSave {
     empire_info: {}, stats: {}, diplomatic: {},
     timeline_events: [], crisis_encounters: [],
     key_technologies: [], megastructures: [], war_history: [],
+    rawFlags: [],
   };
 
   const { csPos, cePos, playerCountryId } = findPlayerCountry(data);
@@ -276,6 +277,14 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
   function cat(name: string): string { for (const [p,c] of catRules) if (name.startsWith(p)) return c; return 'other'; }
 
   const tickBase = 62800000;
+
+  // Store raw flags for event chain detection
+  result.rawFlags = rawFlags.map(rf => ({
+    name: rf.name,
+    tick: rf.tick,
+    scope: 'country', // Most flags from this extraction are country-level
+  }));
+
   for (const rf of rawFlags) {
     const year = Math.round(2200 + (rf.tick - tickBase) / 8350);
     result.timeline_events.push({ event: rf.name, category: cat(rf.name), approx_date: year.toString(), key: rf.name });

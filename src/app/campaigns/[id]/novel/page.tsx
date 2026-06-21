@@ -299,6 +299,10 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
             <div className="mt-6 grid gap-5 lg:grid-cols-2">
               <MemorySection title="当前局势" items={continuity.timelineState ? [continuity.timelineState] : []} />
               <MemorySection title="进行中的事件链" items={continuity.activeEventChains} />
+              <MemorySection title="已完成的事件链" items={continuity.completedEventChains} />
+              <MemorySection title="事件链玩家选择" items={continuity.eventChainChoices} />
+              <MemorySection title="事件链后果" items={continuity.eventChainConsequences} />
+              <MemorySection title="未解决事件链线索" items={continuity.unresolvedEventChainClues} />
               <MemorySection title="人物与状态" items={continuity.characters} />
               <MemorySection title="势力与关系" items={continuity.factions} />
               <MemorySection title="未解决伏笔" items={continuity.unresolvedThreads} />

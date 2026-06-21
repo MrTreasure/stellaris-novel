@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server';
-import { getCampaign, getSaves, getMilestones } from '@/lib/db';
+import { getCampaign, getSaves, getMilestones, getAllEventChains, getEventChainNodes } from '@/lib/db';
 import { completeChat, streamChat } from '@/lib/ai-client';
 import type { ContinuityBible } from '@/lib/browser-storage';
 import { loadLore } from '@/lib/lore';
+import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +58,11 @@ function buildPrompt(campaignId: number): { system: string; intro: string } {
 7. 严格延续连续性档案中的人物状态、势力关系、既定事实与未解决伏笔
 8. 新章节应自然承接最近一章的结尾，避免重复介绍已经登场的人物和设定
 9. 除非本章明确推动或解决，不得遗忘、篡改或无故终止既有伏笔
+10. 不得提前泄露尚未在存档中发生的结局
+11. 不得把可能分支写成已发生事实
+12. 后续章节必须延续此前事件链选择
+13. 事件链结束后更新人物、势力和世界状态
+14. 同一事件链跨章节时应保持核心角色、地点、谜团和语气一致
 
 【群星世界观参考】
 ${loreText}`;
@@ -179,14 +185,23 @@ function formatContinuity(continuity?: ContinuityBible): string {
     `势力：${continuity.factions?.join('；') || '未记录'}`,
     `既定事实：${continuity.establishedFacts?.join('；') || '未记录'}`,
     `未解决伏笔：${continuity.unresolvedThreads?.join('；') || '未记录'}`,
-    `进行中的游戏事件链：${continuity.activeEventChains?.join('；') || '未记录'}`,
+    `进行中的事件链：${continuity.activeEventChains?.join('；') || '未记录'}`,
+    `已完成的事件链：${continuity.completedEventChains?.join('；') || '未记录'}`,
+    `事件链玩家选择：${continuity.eventChainChoices?.join('；') || '未记录'}`,
+    `事件链后果：${continuity.eventChainConsequences?.join('；') || '未记录'}`,
+    `未解决的事件链线索：${continuity.unresolvedEventChainClues?.join('；') || '未记录'}`,
   ].join('\n');
 }
 
 async function extractChapterMemory(content: string, previous: ContinuityBible | undefined, config: { apiKey: string; baseUrl: string; model: string }) {
   const fallback = {
     summary: content.slice(0, 300),
-      continuity: previous || { characters: [], factions: [], unresolvedThreads: [], activeEventChains: [], establishedFacts: [], timelineState: '' },
+    continuity: previous || {
+      characters: [], factions: [], unresolvedThreads: [],
+      activeEventChains: [], completedEventChains: [],
+      eventChainChoices: [], eventChainConsequences: [],
+      unresolvedEventChainClues: [], establishedFacts: [], timelineState: '',
+    },
   };
   try {
     const response = await completeChat([
@@ -196,7 +211,7 @@ async function extractChapterMemory(content: string, previous: ContinuityBible |
       },
       {
         role: 'user',
-        content: `旧连续性档案：\n${JSON.stringify(previous || {})}\n\n新章节：\n${content}\n\n输出结构：{"summary":"200-350字章节概要","continuity":{"characters":["人物及当前状态"],"factions":["势力及关系"],"unresolvedThreads":["尚未解决的伏笔"],"activeEventChains":["仍在推进、尚未完结的群星事件链及当前阶段"],"establishedFacts":["不可违背的既定事实"],"timelineState":"章节结束时的时间和总体局势"}}`,
+        content: `旧连续性档案：\n${JSON.stringify(previous || {})}\n\n新章节：\n${content}\n\n输出结构：{"summary":"200-350字章节概要","continuity":{"characters":["人物及当前状态"],"factions":["势力及关系"],"unresolvedThreads":["尚未解决的伏笔"],"activeEventChains":["仍在推进、尚未完结的群星事件链及当前阶段"],"completedEventChains":["已完结的事件链及其结局"],"eventChainChoices":["玩家在事件链中的关键选择"],"eventChainConsequences":["事件链选择导致的后果"],"unresolvedEventChainClues":["已知但尚未揭示的事件链线索,不可提前泄露结局"],"establishedFacts":["不可违背的既定事实"],"timelineState":"章节结束时的时间和总体局势"}}`,
       },
     ], config);
     const parsed = JSON.parse(response);
@@ -207,6 +222,10 @@ async function extractChapterMemory(content: string, previous: ContinuityBible |
         factions: parsed.continuity?.factions || [],
         unresolvedThreads: parsed.continuity?.unresolvedThreads || [],
         activeEventChains: parsed.continuity?.activeEventChains || [],
+        completedEventChains: parsed.continuity?.completedEventChains || [],
+        eventChainChoices: parsed.continuity?.eventChainChoices || [],
+        eventChainConsequences: parsed.continuity?.eventChainConsequences || [],
+        unresolvedEventChainClues: parsed.continuity?.unresolvedEventChainClues || [],
         establishedFacts: parsed.continuity?.establishedFacts || [],
         timelineState: parsed.continuity?.timelineState || '',
       },
@@ -217,40 +236,48 @@ async function extractChapterMemory(content: string, previous: ContinuityBible |
 }
 
 function buildEventChains(milestones: { event_date: string; title: string; raw_flag: string | null }[]): string {
-  const groups = new Map<string, { label: string; events: string[] }>();
-  for (const milestone of milestones) {
-    const chain = identifyEventChain(milestone.raw_flag || '', milestone.title);
-    if (!chain) continue;
-    const group = groups.get(chain.id) || { label: chain.label, events: [] };
-    group.events.push(`[${milestone.event_date}] ${milestone.title}`);
-    groups.set(chain.id, group);
-  }
-  return [...groups.values()]
-    .filter(group => group.events.length >= 2)
-    .map(group => `### ${group.label}\n${group.events.map(event => `- ${event}`).join('\n')}`)
-    .join('\n\n');
-}
+  // Build evidence from milestones for graph-based chain detection
+  const evidence: SaveEvidence = {
+    countryFlags: new Set<string>(),
+    globalFlags: new Set<string>(),
+    planetFlags: new Set<string>(),
+    starFlags: new Set<string>(),
+    completedAnomalies: [],
+    activeProjects: [],
+    completedProjects: [],
+    archaeologySites: [],
+    firedEvents: [],
+    milestoneFlags: milestones.map(m => ({ flag: m.raw_flag || '', date: m.event_date })),
+  };
 
-function identifyEventChain(flag: string, title: string): { id: string; label: string } | null {
-  const source = `${flag} ${title}`.toLowerCase();
-  const known: [RegExp, string, string][] = [
-    [/yuht/, 'precursor-yuht', '尤特先驱者事件链'],
-    [/vultaum/, 'precursor-vultaum', '沃陶姆先驱者事件链'],
-    [/first_league|第一联盟/, 'precursor-first-league', '第一联盟先驱者事件链'],
-    [/irassian|伊拉斯/, 'precursor-irassian', '伊拉斯协约国先驱者事件链'],
-    [/cybrex|赛博勒克斯/, 'precursor-cybrex', '赛博勒克斯先驱者事件链'],
-    [/baol|巴奥/, 'precursor-baol', '巴奥先驱者事件链'],
-    [/zroni|泽珞/, 'precursor-zroni', '泽珞先驱者事件链'],
-    [/rubricator|遗珍线索/, 'rubricator', '碎片整理者事件链'],
-    [/great_khan|horde|大可汗/, 'great-khan', '大可汗事件链'],
-    [/galactic_community|galcom|银河共同体/, 'galactic-community', '银河共同体事件链'],
-    [/galactic_market|银河市场/, 'galactic-market', '银河市场事件链'],
-    [/first_contact|fc_event|首次接触/, 'first-contact', '首次接触事件链'],
-    [/storm|风暴/, 'cosmic-storm', '宇宙风暴事件链'],
-    [/synth_queen|机械女皇/, 'synth-queen', '机械女皇事件链'],
-  ];
-  for (const [pattern, id, label] of known) {
-    if (pattern.test(source)) return { id, label };
+  for (const m of milestones) {
+    const flag = m.raw_flag || '';
+    if (!flag) continue;
+    if (flag.startsWith('global_')) evidence.globalFlags.add(flag);
+    else evidence.countryFlags.add(flag);
+    if (flag.match(/\.\d+$/)) evidence.firedEvents.push(flag);
+    if (flag.startsWith('anomaly_') || flag.match(/^anomaly\./)) evidence.completedAnomalies.push(flag);
   }
-  return null;
+
+  let chains: ReturnType<typeof detectEventChains> = [];
+  try {
+    chains = detectEventChains(evidence);
+  } catch {
+    chains = [];
+  }
+
+  if (chains.length === 0) return '暂无可识别的多阶段事件链。';
+
+  const parts: string[] = [];
+  for (const chain of chains) {
+    const statusLabel = chain.status === 'completed' ? '已完成' : chain.status === 'active' ? '进行中' : chain.status === 'failed' ? '已失败' : '状态未知';
+    const categoryLabel = chain.category || '剧情';
+    parts.push(`### ${chain.name} (${statusLabel}, ${categoryLabel})`);
+    parts.push(`当前阶段: ${chain.currentStage}`);
+    if (chain.selectedChoices.length > 0) {
+      parts.push(`玩家选择: ${chain.selectedChoices.join(', ')}`);
+    }
+    parts.push('');
+  }
+  return parts.join('\n');
 }

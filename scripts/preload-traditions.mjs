@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getDb, fileHash, detectChanges, batchInsert, updateFileHashes, getGameVersion, setGameVersion, closeDb } from './shared.mjs';
 
-const STELLARIS = 'G:/SteamLibrary/steamapps/common/Stellaris';
+const STELLARIS = 'E:/SteamLibrary/steamapps/common/Stellaris';
 
 function parseTraditions(dirPath) {
   const traditions = [];

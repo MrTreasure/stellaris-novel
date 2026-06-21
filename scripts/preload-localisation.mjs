@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { basename, join } from 'path';
 import { getDb, fileHash, detectChanges, batchInsert, batchUpdate, updateFileHashes, getGameVersion, setGameVersion, closeDb } from './shared.mjs';
 
-const STELLARIS = 'G:/SteamLibrary/steamapps/common/Stellaris';
+const STELLARIS = 'E:/SteamLibrary/steamapps/common/Stellaris';
 
 function parseAllYamlFiles(locDir) {
   const result = new Map();

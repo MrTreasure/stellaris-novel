@@ -19,6 +19,10 @@ export interface ContinuityBible {
   factions: string[];
   unresolvedThreads: string[];
   activeEventChains: string[];
+  completedEventChains: string[];
+  eventChainChoices: string[];
+  eventChainConsequences: string[];
+  unresolvedEventChainClues: string[];
   establishedFacts: string[];
   timelineState: string;
 }
@@ -38,6 +42,10 @@ export const emptyContinuity: ContinuityBible = {
   factions: [],
   unresolvedThreads: [],
   activeEventChains: [],
+  completedEventChains: [],
+  eventChainChoices: [],
+  eventChainConsequences: [],
+  unresolvedEventChainClues: [],
   establishedFacts: [],
   timelineState: '',
 };

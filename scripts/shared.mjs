@@ -43,6 +43,47 @@ export function getDb() {
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS game_event_nodes (
+        id TEXT PRIMARY KEY,
+        node_type TEXT NOT NULL,
+        title_key TEXT,
+        desc_key TEXT,
+        zh_title TEXT,
+        zh_description TEXT,
+        file_path TEXT,
+        raw_text TEXT
+      );
+      CREATE TABLE IF NOT EXISTS game_event_edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_id TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        edge_type TEXT NOT NULL,
+        option_name_key TEXT,
+        conditions TEXT,
+        effects TEXT
+      );
+      CREATE TABLE IF NOT EXISTS game_event_flags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_id TEXT NOT NULL,
+        flag_name TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        scope TEXT DEFAULT 'country'
+      );
+      CREATE TABLE IF NOT EXISTS game_event_chains (
+        chain_id TEXT PRIMARY KEY,
+        name_key TEXT,
+        zh_name TEXT,
+        category TEXT,
+        root_node_id TEXT,
+        source TEXT
+      );
+      CREATE TABLE IF NOT EXISTS game_event_chain_nodes (
+        chain_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        stage_order INTEGER DEFAULT 0,
+        stage_type TEXT DEFAULT 'progress',
+        PRIMARY KEY (chain_id, node_id)
+      );
     `);
   }
   return _db;

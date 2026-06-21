@@ -6,7 +6,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { getDb, closeDb, getGameVersion, setGameVersion } from './shared.mjs';
 
-const STELLARIS = 'G:/SteamLibrary/steamapps/common/Stellaris';
+const STELLARIS = 'E:/SteamLibrary/steamapps/common/Stellaris';
 
 async function main() {
   const db = getDb();
@@ -61,6 +61,13 @@ async function main() {
     const r = syncTraditions(db, { changed: null, isFirst: !oldVer });
     console.log(`  Traditions: +${r.inserts}\n`);
   } catch(e) { console.error('  Traditions 失败:', e.message, '\n'); }
+
+  // 6. 事件关系图 (事件/异常/考古/项目/on_action/事件链)
+  try {
+    const { syncRelations } = await import('./preload-relations.mjs');
+    const r = syncRelations(db, { changed: null, isFirst: !oldVer });
+    console.log(`  Relations: ${r.nodes} nodes, ${r.edges} edges, ${r.flags} flags, ${r.chains} chains\n`);
+  } catch(e) { console.error('  Relations 失败:', e.message, '\n'); }
 
   setGameVersion(db, newVer);
   console.log('='.repeat(50));

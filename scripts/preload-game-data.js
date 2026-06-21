@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
-const STELLARIS = 'G:/SteamLibrary/steamapps/common/Stellaris';
+const STELLARIS = 'E:/SteamLibrary/steamapps/common/Stellaris';
 const DB_PATH = path.join(__dirname, '..', 'data', 'stellaris.db');
 
 // 确保 data 目录存在

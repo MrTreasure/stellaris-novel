@@ -165,6 +165,57 @@ function runMigrations(db: DatabaseSync) {
       entry_count INTEGER DEFAULT 0,
       updated_at TEXT
     );
+
+    -- 事件关系图: 节点 (event/anomaly/project/situation/archaeology/on_action)
+    CREATE TABLE IF NOT EXISTS game_event_nodes (
+      id TEXT PRIMARY KEY,
+      node_type TEXT NOT NULL,
+      title_key TEXT,
+      desc_key TEXT,
+      zh_title TEXT,
+      zh_description TEXT,
+      file_path TEXT,
+      raw_text TEXT
+    );
+
+    -- 事件关系图: 边 (option/trigger/immediate/after/on_success/on_fail/on_action)
+    CREATE TABLE IF NOT EXISTS game_event_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      edge_type TEXT NOT NULL,
+      option_name_key TEXT,
+      conditions TEXT,
+      effects TEXT
+    );
+
+    -- 事件关系图: flag 标记 (set/remove/has/not_has)
+    CREATE TABLE IF NOT EXISTS game_event_flags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      node_id TEXT NOT NULL,
+      flag_name TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      scope TEXT DEFAULT 'country'
+    );
+
+    -- 事件关系图: 事件链定义
+    CREATE TABLE IF NOT EXISTS game_event_chains (
+      chain_id TEXT PRIMARY KEY,
+      name_key TEXT,
+      zh_name TEXT,
+      category TEXT,
+      root_node_id TEXT,
+      source TEXT
+    );
+
+    -- 事件关系图: 事件链-节点关联
+    CREATE TABLE IF NOT EXISTS game_event_chain_nodes (
+      chain_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      stage_order INTEGER DEFAULT 0,
+      stage_type TEXT DEFAULT 'progress',
+      PRIMARY KEY (chain_id, node_id)
+    );
   `);
 
   // 旧数据库按需补列；CREATE TABLE 已包含该列，新数据库不会重复执行。
@@ -340,6 +391,90 @@ export function getNovelBackground(id: number): string {
 
 export function updateChapterContent(id: number, content: string) {
   getDb().prepare('UPDATE chapters SET content = ? WHERE id = ?').run(content, id);
+}
+
+// ===== 事件关系图操作 =====
+
+export interface EventNode {
+  id: string;
+  node_type: string;
+  title_key: string | null;
+  desc_key: string | null;
+  zh_title: string | null;
+  zh_description: string | null;
+  file_path: string | null;
+  raw_text: string | null;
+}
+
+export interface EventEdge {
+  id: number;
+  source_id: string;
+  target_id: string;
+  edge_type: string;
+  option_name_key: string | null;
+  conditions: string | null;
+  effects: string | null;
+}
+
+export interface EventChain {
+  chain_id: string;
+  name_key: string | null;
+  zh_name: string | null;
+  category: string | null;
+  root_node_id: string | null;
+  source: string | null;
+}
+
+export interface EventChainNode {
+  chain_id: string;
+  node_id: string;
+  stage_order: number;
+  stage_type: string;
+}
+
+export function getEventNode(id: string): EventNode | undefined {
+  return getDb().prepare('SELECT * FROM game_event_nodes WHERE id = ?').get(id) as EventNode | undefined;
+}
+
+export function getEventEdges(sourceId: string): EventEdge[] {
+  return getDb().prepare('SELECT * FROM game_event_edges WHERE source_id = ?').all(sourceId) as EventEdge[];
+}
+
+export function getEventChain(chainId: string): EventChain | undefined {
+  return getDb().prepare('SELECT * FROM game_event_chains WHERE chain_id = ?').get(chainId) as EventChain | undefined;
+}
+
+export function getEventChainNodes(chainId: string): EventChainNode[] {
+  return getDb().prepare('SELECT * FROM game_event_chain_nodes WHERE chain_id = ? ORDER BY stage_order').all(chainId) as EventChainNode[];
+}
+
+export function getAllEventChains(): EventChain[] {
+  return getDb().prepare('SELECT * FROM game_event_chains ORDER BY category, chain_id').all() as EventChain[];
+}
+
+export function getNodeFlags(nodeId: string): { flag_name: string; operation: string; scope: string }[] {
+  return getDb().prepare('SELECT flag_name, operation, scope FROM game_event_flags WHERE node_id = ?').all(nodeId) as { flag_name: string; operation: string; scope: string }[];
+}
+
+export function searchEventNodes(query: string): EventNode[] {
+  return getDb().prepare(
+    "SELECT * FROM game_event_nodes WHERE zh_title LIKE ? OR id LIKE ? OR title_key LIKE ? LIMIT 30"
+  ).all(`%${query}%`, `%${query}%`, `%${query}%`) as EventNode[];
+}
+
+export function getEdgeCount(): number {
+  const r = getDb().prepare('SELECT COUNT(*) as c FROM game_event_edges').get() as { c: number };
+  return r.c;
+}
+
+export function getNodeCount(): number {
+  const r = getDb().prepare('SELECT COUNT(*) as c FROM game_event_nodes').get() as { c: number };
+  return r.c;
+}
+
+export function getChainCount(): number {
+  const r = getDb().prepare('SELECT COUNT(*) as c FROM game_event_chains').get() as { c: number };
+  return r.c;
 }
 
 export function closeDb() {

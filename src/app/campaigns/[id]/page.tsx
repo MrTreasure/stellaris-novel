@@ -52,6 +52,57 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
 
       {stats.empire_evolution.length > 1 && <Chart data={stats.empire_evolution} />}
 
+      {data.eventChains && data.eventChains.length > 0 && (
+        <section className="mt-8">
+          <div className="mb-4 flex items-center gap-3">
+            <CheckIcon className="h-5 w-5 text-[#6dd7cc]" />
+            <h2 className="text-xl font-semibold text-[#d7e6e4]">多阶段事件链</h2>
+            <span className="font-mono text-xs tracking-wider text-[#668486]">{data.eventChains.length} CHAINS</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {data.eventChains.map((chain: any) => {
+              const statusColors: Record<string, string> = {
+                active: 'border-l-[#64d9cf]',
+                completed: 'border-l-[#7fd6a0]',
+                failed: 'border-l-[#db7168]',
+                unknown: 'border-l-[#607c7e]',
+              };
+              const statusLabels: Record<string, string> = {
+                active: '进行中',
+                completed: '已完成',
+                failed: '已失败',
+                unknown: '未知',
+              };
+              return (
+                <div key={chain.chainId} className={`panel border-l-2 p-4 ${statusColors[chain.status] || statusColors.unknown}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-sm font-semibold text-[#cbdad8]">{chain.name}</span>
+                    <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold tracking-wider ${
+                      chain.status === 'active' ? 'bg-[#3daea4]/20 text-[#64d9cf]' :
+                      chain.status === 'completed' ? 'bg-[#3dae4a]/20 text-[#7fd6a0]' :
+                      'bg-[#3d4a4a]/20 text-[#607c7e]'
+                    }`}>{statusLabels[chain.status] || chain.status}</span>
+                  </div>
+                  <div className="mt-2 text-xs text-[#668486]">
+                    <span className="text-[#789496]">当前阶段:</span> {chain.currentStage}
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#607c7e]">
+                    {chain.category && <span className="mr-2 rounded border border-[#2a5659] px-1.5 py-0.5 font-mono text-[10px] text-[#607c7e]">{chain.category}</span>}
+                    {chain.observedNodes.length > 0 && <span>{chain.observedNodes.length} 个已观察节点</span>}
+                  </div>
+                  {chain.startedAt && (
+                    <div className="mt-2 text-[11px] text-[#5a7678]">
+                      <CalendarIcon className="mr-1 inline h-3 w-3" />
+                      {chain.startedAt}{chain.updatedAt && chain.updatedAt !== chain.startedAt ? ` — ${chain.updatedAt}` : ''}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="panel mt-8 p-5 sm:p-7">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

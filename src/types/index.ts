@@ -123,6 +123,23 @@ export interface ParsedSave {
     war_goal?: string;
   }[];
   colonies?: { name: string; year: number }[];
+  // Event chain detection fields
+  rawFlags: { name: string; tick: number; scope: string }[];
+}
+
+// ===== 事件链检测 =====
+
+export interface DetectedEventChain {
+  chainId: string;
+  name: string;
+  category: string;
+  status: "active" | "completed" | "failed" | "unknown";
+  currentStage: string;
+  observedNodes: string[];
+  selectedChoices: string[];
+  possibleNextNodes: string[];
+  startedAt?: string;
+  updatedAt?: string;
 }
 
 // ===== AI 生成请求/响应 =====

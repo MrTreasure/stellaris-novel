@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCampaign, getSaves, getMilestones, getChapters, getNovels } from '@/lib/db';
+import { getCampaign, getSaves, getMilestones, getChapters, getNovels, getAllEventChains, getEventChainNodes } from '@/lib/db';
 import { getDb } from '@/lib/db';
 import { localizeMilestoneTitle } from '@/lib/flags';
+import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
 
 export async function GET(
   _req: NextRequest,
@@ -25,14 +26,55 @@ export async function GET(
     eventTypes[m.event_type] = (eventTypes[m.event_type] || 0) + 1;
   }
 
+  // Build event chain evidence from milestones
+  const evidence: SaveEvidence = {
+    countryFlags: new Set<string>(),
+    globalFlags: new Set<string>(),
+    planetFlags: new Set<string>(),
+    starFlags: new Set<string>(),
+    completedAnomalies: [],
+    activeProjects: [],
+    completedProjects: [],
+    archaeologySites: [],
+    firedEvents: [],
+    milestoneFlags: milestones.map(m => ({ flag: m.raw_flag || '', date: m.event_date })),
+  };
+
+  for (const m of milestones) {
+    const flag = m.raw_flag || '';
+    if (!flag) continue;
+    // Most flags from save-parser are country flags
+    if (flag.startsWith('global_') || flag.includes('global_flag')) {
+      evidence.globalFlags.add(flag);
+    } else {
+      evidence.countryFlags.add(flag);
+    }
+    // Detect event IDs from raw flags
+    if (flag.match(/\.\d+$/)) {
+      evidence.firedEvents.push(flag);
+    }
+    // Detect anomalies
+    if (flag.startsWith('anomaly_') || flag.match(/^anomaly\./)) {
+      evidence.completedAnomalies.push(flag);
+    }
+  }
+
+  // Detect event chains using graph data
+  let eventChains: ReturnType<typeof detectEventChains> = [];
+  try {
+    eventChains = detectEventChains(evidence);
+  } catch { /* graph data might not be loaded yet */ }
+
   return NextResponse.json({
     campaign,
     saves,
     milestones,
+    eventChains,
     stats: {
       total_saves: saves.length,
       total_milestones: milestones.length,
       event_types: eventTypes,
+      event_chain_count: eventChains.length,
       empire_evolution: saves.map(s => ({
         date: s.game_date,
         empire_size: s.empire_size,
