@@ -24,6 +24,9 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
   const [showMemory, setShowMemory] = useState(false);
   const [bgEnabled, setBgEnabled] = useState(false);
   const [draftBgEnabled, setDraftBgEnabled] = useState(false);
+  const [promptPreview, setPromptPreview] = useState('');
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -192,6 +195,22 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
     URL.revokeObjectURL(url);
   };
 
+  const loadPromptPreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const response = await fetch(`/api/campaigns/${campaignId}`);
+      const data = await response.json();
+      const { system, intro } = buildPromptPreview(data, { background: bgEnabled ? bgSettings : '', chapters, continuity });
+      setPromptPreview(`== 系统提示词 (System Prompt) ==\n\n${system}\n\n== 用户提示词 (User Prompt) ==\n\n${intro}`);
+      setShowPromptPreview(true);
+    } catch (e: any) {
+      setPromptPreview('无法加载提示词预览: ' + (e.message || ''));
+      setShowPromptPreview(true);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
   const currentChapterObj = chapters.find(chapter => chapter.chapter_number === currentChapter);
   const activeContent = streamContent || currentChapterObj?.content || '';
 
@@ -234,6 +253,9 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
           </button>
           <button onClick={() => setShowMemory(true)} className="secondary-button w-full">
             <BookIcon className="h-4 w-4" />连续性档案
+          </button>
+          <button onClick={loadPromptPreview} disabled={loadingPreview} className="secondary-button w-full">
+            <SparkIcon className="h-4 w-4" />{loadingPreview ? '加载中...' : '模型提示词预览'}
           </button>
           <button onClick={downloadNovel} disabled={chapters.length === 0} className="secondary-button w-full">
             <DownloadIcon className="h-4 w-4" />下载整部小说
@@ -340,8 +362,124 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
           </div>
         </div>
       )}
+
+      {showPromptPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+          <div className="panel flex max-h-[90vh] w-full max-w-4xl flex-col p-6 sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="preview-title" className="text-xl font-semibold text-[#dbeae8]">完整提示词预览</h2>
+                <p className="mt-2 text-sm text-[#829c9e]">以下为发送给 AI 模型的完整提示词，包含系统指令和用户数据。可复制用于调试。</p>
+              </div>
+              <button onClick={() => setShowPromptPreview(false)} className="secondary-button shrink-0">关闭</button>
+            </div>
+            <textarea
+              readOnly
+              value={promptPreview}
+              className="field mt-4 flex-1 min-h-[400px] resize-none font-mono text-xs leading-5"
+            />
+            <div className="mt-4 flex justify-end gap-3">
+              <button onClick={() => {
+                navigator.clipboard.writeText(promptPreview);
+              }} className="secondary-button">复制到剪贴板</button>
+              <button onClick={() => setShowPromptPreview(false)} className="primary-button">关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function buildPromptPreview(data: any, opts: { background: string; chapters: LocalChapter[]; continuity: ContinuityBible }) {
+  const { campaign, saves, milestones } = data;
+  const latestSave = saves?.[saves.length - 1];
+  const ei = {
+    name: latestSave?.empire_name, species: latestSave?.species_name,
+    size: latestSave?.empire_size, military: latestSave?.military_power,
+    tech: latestSave?.tech_power, rank: latestSave?.victory_rank,
+    authority: latestSave?.authority,
+    ethics: safeJson(latestSave?.ethics),
+    civics: safeJson(latestSave?.civics),
+    traits: safeJson(latestSave?.species_traits),
+  };
+  const evolution = (saves || []).map((s: any) => ({
+    date: s.game_date, size: s.empire_size, military: s.military_power,
+    tech: s.tech_power, fleet: s.fleet_power, pops: s.total_pops,
+  }));
+
+  const system = `你是资深科幻小说作家，专精太空歌剧与银河史诗题材。文风参照刘慈欣《三体》的宏大叙事和阿西莫夫《基地》的历史纵深。
+
+你正在为《群星》(Stellaris) 游戏中的一个星际文明撰写编年史小说。所有事件基于真实游戏数据，你需要将其编织成引人入胜的银河史诗。
+
+【写作要求】
+1. 严格基于事件时间轴，不虚构未发生的事件，但可以对事件进行合理文学化渲染
+2. 描写人物内心、星际战斗场面、外交博弈、科技突破的震撼
+3. 善用对话和场景描写增强代入感
+4. 每章2500-3500字，结构完整（开端-发展-高潮-收尾）
+5. 使用规范中文，避免翻译腔
+6. 时间跨度过大时用"数十年转瞬即逝"等自然过渡
+7. 严格延续连续性档案中的人物状态、势力关系、既定事实与未解决伏笔
+8. 新章节应自然承接最近一章的结尾，避免重复介绍已经登场的人物和设定
+9. 除非本章明确推动或解决，不得遗忘、篡改或无故终止既有伏笔
+10. 不得提前泄露尚未在存档中发生的结局
+11. 不得把可能分支写成已发生事实
+12. 后续章节必须延续此前事件链选择
+13. 事件链结束后更新人物、势力和世界状态
+14. 同一事件链跨章节时应保持核心角色、地点、谜团和语气一致`;
+
+  const ethicsStr = (ei.ethics || []).join('、') || '未知';
+  const civicsStr = (ei.civics || []).join('、') || '未知';
+  const keyMilestones = (milestones || []).filter((m: any) => m.importance === 'critical' || m.importance === 'major');
+  const events = keyMilestones.length > 50
+    ? keyMilestones.map((m: any) => `[${m.event_date}] ${m.title}`).join('\n')
+    : (milestones || []).map((m: any) => `[${m.event_date}] ${m.title}`).join('\n');
+  const summaries = opts.chapters.map((c: any) => `- 第${c.chapter_number}章：${c.summary || '暂无概要'}`).join('\n');
+
+  let intro = `${opts.background ? `## 额外背景设定\n${opts.background}\n\n` : ''}## 帝国档案
+名称: ${ei.name || '未知'}
+物种: ${ei.species || '人类'}
+政体: ${ei.authority || '未知'}
+伦理: ${ethicsStr}
+理念: ${civicsStr}
+物种特质: ${ei.traits ? ei.traits.join('、') : '未知'}
+最终规模: ${ei.size || '?'}
+最终军力: ${ei.military?.toLocaleString() || '?'}
+最终科技: ${ei.tech?.toLocaleString() || '?'}
+舰队战力: ${latestSave?.fleet_power?.toLocaleString() || '?'}
+总人口: ${latestSave?.total_pops?.toLocaleString() || '?'}
+胜利排名: 第${ei.rank || '?'}名
+
+## 实力演变
+${evolution.map((e: any) => `- ${e.date}: 规模${e.size}, 军力${e.military?.toLocaleString()}, 科技${e.tech?.toLocaleString()}, 舰队${e.fleet?.toLocaleString() || '?'}, 人口${e.pops?.toLocaleString() || '?'}`).join('\n')}
+
+## 重大事件时间轴
+${events}
+
+## 长篇连续性档案
+${formatContinuityPreview(opts.continuity)}
+
+## 历史章节概要
+${summaries || '（无）'}`;
+
+  return { system, intro };
+}
+
+function safeJson(s: string | null): string[] {
+  if (!s) return [];
+  try { return JSON.parse(s); } catch { return []; }
+}
+
+function formatContinuityPreview(c: ContinuityBible): string {
+  return [
+    `当前局势：${c.timelineState || '未记录'}`,
+    `人物：${c.characters?.join('；') || '未记录'}`,
+    `势力：${c.factions?.join('；') || '未记录'}`,
+    `既定事实：${c.establishedFacts?.join('；') || '未记录'}`,
+    `未解决伏笔：${c.unresolvedThreads?.join('；') || '未记录'}`,
+    `进行中的事件链：${c.activeEventChains?.join('；') || '未记录'}`,
+    `已完成的事件链：${c.completedEventChains?.join('；') || '未记录'}`,
+  ].join('\n');
 }
 
 function MemorySection({ title, items }: { title: string; items: string[] }) {
