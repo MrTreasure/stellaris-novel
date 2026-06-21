@@ -44,6 +44,8 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [outline, setOutline] = useState('');
   const [generatingOutline, setGeneratingOutline] = useState(false);
+  const [showOutline, setShowOutline] = useState(false);
+  const [toolCalls, setToolCalls] = useState<Array<{ id: string; name: string; args: unknown; status: 'running' | 'done'; result?: unknown }>>([]);
   const streamEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,13 +75,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
     })();
   }, [campaignId]);
 
-  useEffect(() => {
-    if (!streamContent) return;
-    streamEndRef.current?.scrollIntoView({
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-      block: 'end',
-    });
-  }, [streamContent]);
+  // Auto-scroll disabled during generation — user controls scroll position
 
   const persistNovel = async (nextChapters: LocalChapter[], nextMessages?: NovelMessage[], background = bgSettings, enabled = bgEnabled) => {
     await saveLocalNovel({
@@ -108,6 +104,42 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
     setShowBg(false);
   };
 
+  const deleteChapter = async (chapterNumber: number) => {
+    if (!confirm(`确认删除第${chapterNumber}章？此操作不可撤销，相关对话历史也会清除。`)) return;
+    const targetChapter = chapters.find(c => c.chapter_number === chapterNumber);
+    if (!targetChapter) return;
+    const nextChapters = chapters.filter(c => c.chapter_number !== chapterNumber);
+
+    // Scan messages to find and remove the assistant response for this chapter
+    // Match by content: the assistant message should contain the chapter content (or at least its start)
+    const contentStart = targetChapter.content?.slice(0, 200)?.trim();
+    const nextMessages = [...messages];
+    if (contentStart) {
+      // Find assistant message containing this chapter's content
+      const asstIdx = nextMessages.findIndex(m =>
+        m.role === 'assistant' && typeof m.content === 'string' && m.content.includes(contentStart)
+      );
+      if (asstIdx !== -1) {
+        // For non-first chapters, also remove the preceding user prompt
+        if (chapterNumber > 1 && asstIdx > 0 && nextMessages[asstIdx - 1].role === 'user') {
+          nextMessages.splice(asstIdx - 1, 2);
+        } else {
+          nextMessages.splice(asstIdx, 1);
+        }
+      }
+    }
+    setMessages(nextMessages);
+    setChapters(nextChapters);
+
+    // Navigate to previous chapter if deleting current
+    if (currentChapter === chapterNumber) {
+      const prev = nextChapters.filter(c => c.chapter_number < chapterNumber).at(-1);
+      setCurrentChapter(prev?.chapter_number || 0);
+      setStreamContent('');
+    }
+    await saveLocalNovel({ campaignId, title: `${campaignName}史诗`, background: bgSettings, backgroundEnabled: bgEnabled, outline, messages: nextMessages, chapters: nextChapters, continuity, updatedAt: new Date().toISOString() });
+  };
+
   const hasNextChapter = chapters.some(c => c.chapter_number === currentChapter + 1);
   const hasCurrentChapter = currentChapter > 0 && chapters.some(c => c.chapter_number === currentChapter);
 
@@ -118,8 +150,24 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
     setGenerating(true);
     setStreamContent('');
     setError('');
+    setToolCalls([]);
     const mode = opts?.mode || 'new';
-    const targetChapter = mode === 'rewrite' ? opts?.chapterNumber : chapters.length + 1;
+    const targetChapter = mode === 'rewrite' ? opts?.chapterNumber ?? currentChapter : chapters.length + 1;
+
+    // Immediately create placeholder chapter for new chapters
+    let placeholderChapter: LocalChapter | undefined;
+    if (mode === 'new') {
+      placeholderChapter = {
+        id: `chapter-${targetChapter}-${Date.now()}`,
+        chapter_number: targetChapter,
+        title: `第${targetChapter}章 · 生成中`,
+        content: '',
+        summary: '',
+      };
+      const nextChapters = [...chapters, placeholderChapter];
+      setChapters(nextChapters);
+      setCurrentChapter(targetChapter);
+    }
 
     // Build messages if first generation
     let currentMessages = messages;
@@ -193,6 +241,10 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
             if (payload.type === 'chunk') {
               fullContent += payload.content;
               setStreamContent(fullContent);
+            } else if (payload.type === 'tool-call') {
+              setToolCalls(prev => [...prev, { id: payload.toolCallId || crypto.randomUUID(), name: payload.toolName, args: payload.args, status: 'running' }]);
+            } else if (payload.type === 'tool-result') {
+              setToolCalls(prev => prev.map(t => t.name === payload.toolName && t.status === 'running' ? { ...t, status: 'done', result: payload.result } : t));
             } else if (payload.type === 'done') {
               const chapterNum = payload.chapter_number as number;
               const nextChapter: LocalChapter = {
@@ -205,7 +257,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
               const nextContinuity = payload.continuity || continuity;
               const nextChapters = mode === 'rewrite'
                 ? chapters.map(c => c.chapter_number === chapterNum ? nextChapter : c)
-                : [...chapters, nextChapter];
+                : chapters.map(c => c.id === placeholderChapter?.id ? nextChapter : c);
 
               // Append assistant message
               const nextMessages: NovelMessage[] = [
@@ -239,6 +291,11 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
       }
     } catch (caught: any) {
       setError(caught.message || '生成失败');
+      // Remove placeholder on error
+      if (placeholderChapter) {
+        setChapters(prev => prev.filter(c => c.id !== placeholderChapter!.id));
+        setCurrentChapter(chapters.at(-1)?.chapter_number || 0);
+      }
     } finally {
       setGenerating(false);
     }
@@ -262,7 +319,8 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
   const generateOutline = async () => {
     const config = loadAIConfig();
     if (!config.apiKey) { setError('请先配置 API Key'); return; }
-    setGeneratingOutline(true); setError('');
+    setGeneratingOutline(true); setError(''); setOutline('');
+    setShowOutline(true); // Immediately open dialog for streaming
     try {
       const r = await fetch('/api/novels/generate?campaign_id=' + campaignId);
       const d = await r.json();
@@ -273,13 +331,30 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ system: sysMsg?.content, user: userMsg?.content, config }),
       });
-      const result = await response.json();
-      if (result.outline) {
-        setOutline(result.outline);
-        await saveLocalNovel({ campaignId, title: `${campaignName}史诗`, background: bgSettings, backgroundEnabled: bgEnabled, outline: result.outline, messages, chapters, continuity, updatedAt: new Date().toISOString() });
-      } else {
-        setError(result.error || '大纲生成失败');
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let acc = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const payload = JSON.parse(line);
+            if (payload.type === 'chunk') {
+              acc += payload.content;
+              setOutline(acc);
+            } else if (payload.type === 'error') {
+              setError(payload.error || '大纲生成失败');
+            }
+          } catch {}
+        }
       }
+      await saveLocalNovel({ campaignId, title: `${campaignName}史诗`, background: bgSettings, backgroundEnabled: bgEnabled, outline: acc, messages, chapters, continuity, updatedAt: new Date().toISOString() });
     } catch (e: any) { setError(e.message); }
     finally { setGeneratingOutline(false); }
   };
@@ -306,7 +381,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
   const needsWindow = estimatedTokens > TOKEN_LIMIT;
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[250px_minmax(0,1fr)]" style={{ minHeight: 'calc(100vh - 4rem)' }}>
+    <div className={`mx-auto grid max-w-[1600px] gap-5 px-4 py-6 sm:px-6 ${generating ? 'lg:grid-cols-[220px_minmax(0,1fr)_160px]' : 'lg:grid-cols-[220px_minmax(0,1fr)]'}`} style={{ minHeight: 'calc(100vh - 4rem)' }}>
       <aside className="panel h-fit p-4 lg:sticky lg:top-20">
         <Link href={`/campaigns/${campaignId}`} className="mb-5 inline-flex min-h-11 items-center gap-2 font-mono text-xs tracking-wider text-[#73cfc6] transition hover:text-[#a2fff5]">
           <ChevronLeftIcon className="h-4 w-4" />返回战役
@@ -318,14 +393,21 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
 
         <div className="my-4 flex max-h-[38vh] gap-2 overflow-x-auto lg:block lg:max-h-[42vh] lg:space-y-1 lg:overflow-y-auto">
           {chapters.map(c => (
-            <button key={c.id} onClick={() => { setCurrentChapter(c.chapter_number); setStreamContent(''); }}
-              className={`min-h-11 shrink-0 border px-3 py-2 text-left text-sm transition-colors lg:w-full ${
-                currentChapter === c.chapter_number
-                  ? 'border-[#5cc8be] bg-[#3daea4]/15 text-[#9af2e8]'
-                  : 'border-transparent text-[#7e9899] hover:border-[#31585c] hover:bg-[#0a2029] hover:text-[#c5d7d5]'
-              }`}>
-              <span className="font-mono text-[10px] text-[#537476]">CH.</span> {c.chapter_number.toString().padStart(2, '0')}
-            </button>
+            <div key={c.id} className="group relative shrink-0 lg:w-full">
+              <button onClick={() => { setCurrentChapter(c.chapter_number); setStreamContent(''); }}
+                className={`min-h-11 w-full border px-3 py-2 text-left text-sm transition-colors ${
+                  currentChapter === c.chapter_number
+                    ? 'border-[#5cc8be] bg-[#3daea4]/15 text-[#9af2e8]'
+                    : 'border-transparent text-[#7e9899] hover:border-[#31585c] hover:bg-[#0a2029] hover:text-[#c5d7d5]'
+                }`}>
+                <span className="font-mono text-[10px] text-[#537476]">CH.</span> {c.chapter_number.toString().padStart(2, '0')}
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); deleteChapter(c.chapter_number); }}
+                className="absolute right-1 top-1/2 -translate-y-1/2 hidden h-6 w-6 items-center justify-center rounded text-[10px] text-[#7d5a5a] hover:bg-[#3d1a1a] hover:text-[#e07b7b] group-hover:flex"
+                title="删除本章">
+                ✕
+              </button>
+            </div>
           ))}
         </div>
 
@@ -357,7 +439,11 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
           <button onClick={generateOutline} disabled={generatingOutline} className="secondary-button w-full">
             <SparkIcon className="h-4 w-4" />{generatingOutline ? '生成中...' : outline ? '重新生成大纲' : '生成章节大纲'}
           </button>
-          {outline && <p className="px-1 text-[10px] leading-4 text-[#5f7b7d]">大纲已生成，将在续写时注入提示词</p>}
+          {outline && (
+            <button onClick={() => setShowOutline(true)} className="secondary-button w-full text-left">
+              <BookIcon className="h-4 w-4" />查看大纲
+            </button>
+          )}
           <button onClick={loadPromptPreview} disabled={loadingPreview} className="secondary-button w-full">
             <SparkIcon className="h-4 w-4" />{loadingPreview ? '加载中...' : '模型提示词预览'}
           </button>
@@ -382,8 +468,19 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
             </p>
           )}
         </div>
-        {streamContent && <div className="mb-5 flex items-center gap-2 font-mono text-xs tracking-wider text-[#68c6bd]"><SpinnerIcon className="spin h-3.5 w-3.5" />AI NARRATIVE STREAM ACTIVE</div>}
-        <div className="mx-auto max-w-3xl whitespace-pre-wrap text-[16px] leading-8 text-[#bdcecc]">
+        {generating && (
+          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-xl" aria-hidden="true">
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,rgba(100,223,210,0.12),transparent_60%)] animate-pulse" />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_80%_20%,rgba(142,165,232,0.08),transparent_50%)] animate-pulse" style={{ animationDelay: '400ms' }} />
+            <div className="sci-fi-scanline absolute inset-0" />
+            <div className="absolute inset-0 opacity-20" style={{
+              background: 'repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(100,223,210,0.04) 40px, rgba(100,223,210,0.04) 41px)',
+              animation: 'scanline-drift 3s linear infinite',
+            }} />
+          </div>
+        )}
+        {generating && <div className="mb-5 flex items-center gap-2 font-mono text-xs tracking-wider text-[#68c6bd]"><span className="flex h-2.5 w-2.5"><span className="absolute inline-flex h-2.5 w-2.5 animate-ping rounded-full bg-[#64dfd2] opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#64dfd2]" /></span>AI NARRATIVE STREAM ACTIVE</div>}
+        <div className="mx-auto max-w-5xl whitespace-pre-wrap text-[16px] leading-8 text-[#bdcecc]">
           {activeContent || (
             <div className="flex h-96 items-center justify-center text-[#5e7a7c]">
               <div className="text-center"><BookIcon className="mx-auto mb-5 h-12 w-12 text-[#426c6f]" /><p>从章节控制台启动小说工程</p></div>
@@ -392,6 +489,29 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
           <div ref={streamEndRef} />
         </div>
       </article>
+
+      {generating && (
+        <aside className="panel h-fit p-4 lg:sticky lg:top-20">
+          <div className="flex flex-col items-center gap-3 text-center">
+            <span className="flex h-3 w-3"><span className="absolute inline-flex h-3 w-3 animate-ping rounded-full bg-[#64dfd2] opacity-75" /><span className="relative inline-flex h-3 w-3 rounded-full bg-[#64dfd2]" /></span>
+            <div className="font-mono text-[10px] tracking-widest text-[#68c6bd]">生成中</div>
+            <div className="text-[11px] leading-5 text-[#7d9a9c]">
+              {!streamContent && toolCalls.length === 0 && '准备...'}
+              {toolCalls.some(t => t.status === 'running') && '查询数据中'}
+              {streamContent && !toolCalls.some(t => t.status === 'running') && '撰写中'}
+              {streamContent && toolCalls.some(t => t.status === 'running') && '查询 + 撰写'}
+            </div>
+            <div className="font-mono text-[22px] font-semibold text-[#5cc8be] tabular-nums">{streamContent.length.toLocaleString()}</div>
+            <div className="text-[9px] text-[#537476]">字符</div>
+            {toolCalls.length > 0 && (
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] text-[#687d80]">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#dec374]" />
+                <span>{toolCalls.length} 次工具调用</span>
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
 
       {showBg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="background-title">
@@ -462,6 +582,30 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
                 setShowRewrite(false);
                 setRewriteInstructions('');
               }} disabled={generating} className="primary-button">确认重写</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOutline && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="panel flex h-[95vh] w-full max-w-5xl flex-col p-6 sm:p-8">
+            <div className="flex items-start justify-between gap-4 shrink-0">
+              <div>
+                <h2 className="text-xl font-semibold text-[#dbeae8]">章节大纲</h2>
+                {generatingOutline && <p className="mt-1 font-mono text-xs text-[#68c6bd]"><SpinnerIcon className="spin mr-1 inline h-3 w-3" />流式生成中...</p>}
+              </div>
+              <button onClick={() => setShowOutline(false)} className="secondary-button shrink-0">关闭</button>
+            </div>
+            <textarea value={outline} onChange={e => { setOutline(e.target.value); }}
+              className="field mt-4 flex-1 min-h-[650px] resize-y text-sm leading-7"
+              placeholder={generatingOutline ? '正在生成大纲...' : ''} />
+            <div className="mt-4 flex justify-between gap-3">
+              <p className="text-[11px] text-[#5f7b7d]">大纲会在生成每章时自动注入提示词，支持直接编辑</p>
+              <button onClick={async () => {
+                await saveLocalNovel({ campaignId, title: `${campaignName}史诗`, background: bgSettings, backgroundEnabled: bgEnabled, outline, messages, chapters, continuity, updatedAt: new Date().toISOString() });
+                setShowOutline(false);
+              }} className="primary-button"><SaveIcon className="h-4 w-4" />保存</button>
             </div>
           </div>
         </div>

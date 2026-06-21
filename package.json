@@ -10,6 +10,7 @@
     "test:chronicle": "node --experimental-strip-types scripts/test-chronicle-filter.mjs"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.73",
     "@ai-sdk/openai-compatible": "^2.0.51",
     "adm-zip": "^0.5.17",
     "ai": "^6.0.208",

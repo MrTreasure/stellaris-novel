@@ -1,24 +1,102 @@
 import { NextRequest } from 'next/server';
-import { getCampaign, getSaves, getDb } from '@/lib/db';
-import { completeChat, streamChat } from '@/lib/ai-client';
+import { getCampaign } from '@/lib/db';
+import { streamChatWithTools, completeChat, type ChatMessage } from '@/lib/ai-client';
 import type { ContinuityBible } from '@/lib/browser-storage';
 import { loadLore } from '@/lib/lore';
-import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
 import { novelTools } from '@/lib/ai-tools';
-import { getResolvedCampaignMilestones } from '@/lib/chronicle-query';
+import { buildCampaignFacts } from '@/lib/novel-facts';
 
 export const dynamic = 'force-dynamic';
+
+function buildSystemPrompt(loreText: string): string {
+  return `你是资深科幻小说作家，专精太空歌剧与银河史诗题材。
+
+你正在为《群星》(Stellaris) 游戏中的一个星际文明撰写编年史小说。所有事件基于真实游戏数据。
+
+【事实优先级】
+1. 当前战役已解析事实为最高优先级。通过工具查询确认的事实可视为已发生。
+2. SQLite 中的游戏事件/科技/本地化定义用于解释名词与事件背景。
+3. 世界观参考仅作为通用背景，不得覆盖战役事实。
+4. 如果工具查询结果为"未找到"，使用保守模糊表述，不得编造不存在的事件或细节。
+
+【工具使用纪律 — 关键】
+1. 每章最多进行3-4次工具查询，查询后必须立即开始写正文，不得连续查询。
+2. 先写正文框架，只在遇到真正不确定的专有名词时才查询，不要在写作前批量预查询。
+3. 如果对名词含义有合理推断，直接写作即可，无需验证。
+4. lookup_campaign_fact 的 campaign_id 只能使用上下文明确指定的值，不得猜测。
+5. 已确认的信息复用，不重复查询同一术语。
+6. 一份查询中包含多个相关关键词（如"先驱者 尤特 第一联盟"），一次查清。
+
+**关键纪律：工具调用过程对读者完全不可见。禁止在输出中提及任何工具查询行为（包括但不限于"查询"、"搜索"、"数据库"、"返回结果"等措辞）。在调用工具之前、期间和之后，只输出小说正文内容。工具结果返回后，直接将相关信息自然融入叙事，不要解释信息来源。**
+
+【写作要求】
+1. 严格基于事件时间轴，不虚构未发生的事件
+2. 每章2500-3500字，结构完整（开端-发展-高潮-收尾）
+3. 使用规范中文，避免翻译腔
+4. 延续连续性档案中的人物状态、势力关系与未解决伏笔
+5. 不得提前泄露尚未在存档中发生的结局
+6. 如果工具结果显示信息不足，用模糊表述，不得补完不存在的细节
+7. 如果工具结果与已有对话冲突，以当前战役事实和最近工具结果为准
+
+【群星世界观参考】
+${loreText}`;
+}
+
+function buildUserContext(campaignId: number, chapterNumber: number): string {
+  const facts = buildCampaignFacts(campaignId);
+  if (!facts) return '战役数据不可用。';
+
+  return [
+    `【重要】你的当前 campaign_id 是 ${campaignId}。所有查询本局事实的工具调用必须传入此 ID，禁止使用其他值。`,
+    '',
+    '## 帝国档案',
+    `名称: ${facts.empire.name}`,
+    `物种: ${facts.empire.species}`,
+    `政体: ${facts.empire.authority}`,
+    `伦理: ${facts.empire.ethics.join('、') || '未知'}`,
+    `理念: ${facts.empire.civics.join('、') || '未知'}`,
+    `特质: ${facts.empire.traits.join('、') || '未知'}`,
+    '',
+    '## 帝国现状',
+    `日期: ${facts.currentState.gameDate}`,
+    `规模: ${facts.currentState.empireSize?.toLocaleString()}, 军力: ${facts.currentState.militaryPower?.toLocaleString()}`,
+    `科技: ${facts.currentState.techPower?.toLocaleString()}, 舰队: ${facts.currentState.fleetPower?.toLocaleString()}`,
+    `人口: ${facts.currentState.totalPops?.toLocaleString()}, 殖民地: ${facts.currentState.numColonies}`,
+    '',
+    '## 实力演变',
+    ...facts.evolution.map(e => `- ${e.date}: 规模${e.size?.toLocaleString()}, 军力${e.military?.toLocaleString()}, 科技${e.tech?.toLocaleString()}`),
+    '',
+    '## 当前局势',
+    `著名领袖: ${facts.snapshot.topLeaders.join('；') || '暂无'}`,
+    `主要舰队: ${facts.snapshot.notableFleets.join('；') || '暂无'}`,
+    `外交: ${facts.snapshot.diplomacy || '暂无'}`,
+    `考古遗址: ${facts.snapshot.archaeology.join('；') || '暂无'}`,
+    `活跃局势: ${facts.snapshot.situations.join('；') || '暂无'}`,
+    '',
+    '## 已识别事件链',
+    ...facts.eventChains.map(c => `- ${c.name} (${c.category}): ${c.status} — ${c.stage}`),
+    '',
+    '## 关键事件时间轴',
+    ...facts.keyMilestones.slice(0, 30).map(m => `- [${m.date}] ${m.title}`),
+    '',
+    `## 写作任务`,
+    `请根据以上数据创作第${chapterNumber}章。你可以使用工具查询数据库中不熟悉的专有名词含义、事件链阶段、以及当前战役中的已发生事实。`,
+  ].join('\n');
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const campaignId = parseInt(searchParams.get('campaign_id') || '0');
   if (!campaignId) return new Response('需要 campaign_id', { status: 400 });
 
-  const { system, intro } = buildPrompt(campaignId);
+  const loreText = loadLore('stellaris-lore.md');
+  const system = buildSystemPrompt(loreText);
+  const intro = buildUserContext(campaignId, 1);
+
   return new Response(JSON.stringify({
     messages: [
       { role: 'system', content: system },
-      { role: 'user', content: intro + '\n\n请根据以上数据写第1章。' },
+      { role: 'user', content: intro },
     ],
   }), { headers: { 'Content-Type': 'application/json' } });
 }
@@ -32,16 +110,27 @@ export async function POST(req: NextRequest) {
     if (!config?.apiKey) return new Response('请先配置 API Key', { status: 400 });
     if (!getCampaign(campaign_id)) return new Response('战役不存在', { status: 400 });
 
-    // Use provided messages (full context mode) or build from campaign data
-    let finalMessages: { role: 'system' | 'user' | 'assistant'; content: string }[];
-    if (messages && Array.isArray(messages) && messages.length > 0) {
-      finalMessages = messages;
+    const isFirstChapter = !messages || !Array.isArray(messages) || messages.length === 0;
+    let finalMessages: ChatMessage[];
+
+    if (isFirstChapter) {
+      // If frontend already has messages (with outline from GET endpoint), use them
+      if (messages && Array.isArray(messages) && messages.length > 0) {
+        finalMessages = messages.filter((m: any): m is ChatMessage =>
+          ['system', 'user', 'assistant'].includes(m?.role) && typeof m?.content === 'string'
+        );
+      } else {
+        const loreText = loadLore('stellaris-lore.md');
+        finalMessages = [
+          { role: 'system', content: buildSystemPrompt(loreText) },
+          { role: 'user', content: buildUserContext(campaign_id, chapter_number || 1) },
+        ];
+      }
     } else {
-      const { system, intro } = buildPrompt(campaign_id);
-      finalMessages = [
-        { role: 'system' as const, content: system },
-        { role: 'user' as const, content: intro + `\n\n请根据以上数据写第${chapter_number || 1}章。` },
-      ];
+      // Standardize existing messages
+      finalMessages = messages.filter((m: any): m is ChatMessage =>
+        ['system', 'user', 'assistant'].includes(m?.role) && typeof m?.content === 'string'
+      );
     }
 
     const encoder = new TextEncoder();
@@ -50,12 +139,20 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const generator = streamChat(finalMessages, config, { tools: novelTools });
-
-          for await (const event of generator) {
-            if (event.type === 'text') {
+          for await (const event of streamChatWithTools(finalMessages, config, { tools: novelTools })) {
+            if (event.type === 'text-delta' && event.content) {
               fullContent += event.content;
               controller.enqueue(encoder.encode(JSON.stringify({ type: 'chunk', content: event.content }) + '\n'));
+            } else if (event.type === 'tool-call') {
+              controller.enqueue(encoder.encode(JSON.stringify({ type: 'tool-call', toolName: event.toolName, args: event.args }) + '\n'));
+            } else if (event.type === 'tool-result') {
+              controller.enqueue(encoder.encode(JSON.stringify({ type: 'tool-result', toolName: event.toolName, result: event.result }) + '\n'));
+            } else if (event.type === 'finish') {
+              console.log('[generate] done, usage:', JSON.stringify(event.usage));
+            } else if (event.type === 'error') {
+              controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: event.message }) + '\n'));
+              controller.close();
+              return;
             }
           }
 
@@ -71,8 +168,8 @@ export async function POST(req: NextRequest) {
           }) + '\n'));
           controller.close();
         } catch (e: any) {
-          console.error('Generate error:', e?.message || e, e?.stack?.slice(0, 300));
-          controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: 'AI 生成失败，请检查 API 配置和网络连接。错误: ' + (e?.message || '') }) + '\n'));
+          controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: 'AI 生成失败: ' + (e?.message || '') }) + '\n'));
+          console.error('[generate] Error:', e?.message || e);
           controller.close();
         }
       },
@@ -82,119 +179,11 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     });
   } catch (e: any) {
-    console.error('Generate route error:', e.message);
-    return new Response('服务器内部错误', { status: 500 });
+    return new Response(e.message, { status: 500 });
   }
 }
 
-// ===== Prompt building (used for initial messages or backward compat) =====
-
-function buildPrompt(campaignId: number): { system: string; intro: string } {
-  const campaign = getCampaign(campaignId);
-  const saves = getSaves(campaignId);
-  const milestones = getResolvedCampaignMilestones(getDb(), campaignId, saves);
-  const latestSave = saves.at(-1);
-
-  const empireInfo = latestSave ? {
-    name: latestSave.empire_name, species: latestSave.species_name,
-    size: latestSave.empire_size, military: latestSave.military_power,
-    tech: latestSave.tech_power, rank: latestSave.victory_rank,
-    authority: latestSave.authority,
-    ethics: safeParse(latestSave.ethics), civics: safeParse(latestSave.civics),
-    traits: safeParse(latestSave.species_traits),
-  } : {};
-
-  const evolution = saves.map(s => ({
-    date: s.game_date, size: s.empire_size, military: s.military_power,
-    tech: s.tech_power, fleet: s.fleet_power, pops: s.total_pops, colonies: s.num_colonies,
-  }));
-
-  let rawParsed: any = null;
-  if (latestSave?.raw_json) { try { rawParsed = JSON.parse(latestSave.raw_json); } catch {} }
-
-  const events = milestones.map(m => `[${m.event_date}] ${m.title}`).join('\n');
-  const eventChains = buildEventChains(milestones);
-  const loreText = loadLore('stellaris-lore.md');
-
-  const system = `你是资深科幻小说作家，专精太空歌剧与银河史诗题材。文风参照刘慈欣《三体》的宏大叙事和阿西莫夫《基地》的历史纵深。
-
-你正在为《群星》(Stellaris) 游戏中的一个星际文明撰写编年史小说。所有事件基于真实游戏数据，你需要将其编织成引人入胜的银河史诗。
-
-你可以使用工具查询游戏数据库来了解不熟悉的专有名词（如物种名、科技、事件链、势力等）。
-
-【写作要求】
-1. 严格基于事件时间轴，不虚构未发生的事件，但可以对事件进行合理文学化渲染
-2. 描写人物内心、星际战斗场面、外交博弈、科技突破的震撼
-3. 善用对话和场景描写增强代入感
-4. 每章2500-3500字，结构完整（开端-发展-高潮-收尾）
-5. 使用规范中文，避免翻译腔
-6. 时间跨度过大时用"数十年转瞬即逝"等自然过渡
-7. 严格延续连续性档案中的人物状态、势力关系、既定事实与未解决伏笔
-8. 新章节应自然承接最近一章的结尾，避免重复介绍已经登场的人物和设定
-9. 除非本章明确推动或解决，不得遗忘、篡改或无故终止既有伏笔
-10. 不得提前泄露尚未在存档中发生的结局
-11. 不得把可能分支写成已发生事实
-12. 后续章节必须延续此前事件链选择
-
-【群星世界观参考】
-${loreText}`;
-
-  const intro = `## 帝国档案
-
-名称: ${empireInfo.name || '未知'}
-物种: ${empireInfo.species || '人类'}
-政体: ${empireInfo.authority || '未知'}
-伦理: ${(empireInfo.ethics || []).join('、') || '未知'}
-理念: ${(empireInfo.civics || []).join('、') || '未知'}
-物种特质: ${empireInfo.traits ? empireInfo.traits.join('、') : '未知'}
-最终规模: ${empireInfo.size || '?'}
-最终军力: ${empireInfo.military?.toLocaleString() || '?'}
-最终科技: ${empireInfo.tech?.toLocaleString() || '?'}
-舰队战力: ${latestSave?.fleet_power?.toLocaleString() || '?'}
-总人口: ${latestSave?.total_pops?.toLocaleString() || '?'}
-殖民地数: ${latestSave?.num_colonies || '?'}
-活跃战争: ${latestSave?.active_wars || '?'}
-胜利排名: 第${empireInfo.rank || '?'}名
-
-## 实力演变
-
-${evolution.map(e => `- ${e.date}: 规模${e.size}, 军力${e.military?.toLocaleString()}, 科技${e.tech?.toLocaleString()}, 舰队${e.fleet?.toLocaleString() || '?'}, 人口${e.pops?.toLocaleString() || '?'}`).join('\n')}
-
-## 著名领袖
-${rawParsed?.leaders?.top ? rawParsed.leaders.top.map((l: any) => `- ${l.name} (${l.class}, ${l.level}级, 特质: ${(l.traits || []).join(', ')})`).join('\n') : '暂无数据'}
-
-## 著名舰队
-${rawParsed?.fleets?.notable ? rawParsed.fleets.notable.slice(0, 10).map((f: any) => `- ${f.name}: ${f.ships}舰, 战力${f.power?.toLocaleString()}`).join('\n') : '暂无数据'}
-
-## 外交局势
-${rawParsed?.diplomacy ? `联邦: ${rawParsed.diplomacy.federation_name || '无'}, 贸易协定: ${rawParsed.diplomacy.trade_deals || 0}, 附庸国: ${rawParsed.diplomacy.subjects || 0}${rawParsed.diplomacy.gc_member ? ', 星海共同体成员' : ''}` : '暂无数据'}
-
-## 活跃战争
-${rawParsed?.wars_detailed?.list ? rawParsed.wars_detailed.list.map((w: any) => `- ${w.name}: ${w.attacker} vs ${w.defender}${w.goal ? ` (目标: ${w.goal})` : ''}${w.exhaustion ? ` [厌战: ${w.exhaustion}]` : ''}`).join('\n') : '暂无'}
-
-## 考古遗址与局势
-${rawParsed?.archaeology?.sites ? rawParsed.archaeology.sites.map((a: any) => `- [考古] ${a.name}: 阶段${a.stage}/${a.total_stages}`).join('\n') : ''}${rawParsed?.situations?.list ? rawParsed.situations.list.map((s: any) => `- [局势] ${s.type}${s.progress !== undefined ? ` (${s.progress}%)` : ''}${s.target ? ` → ${s.target}` : ''}`).join('\n') : ''}
-
-## 派系
-${rawParsed?.population?.factions ? rawParsed.population.factions.map((f: any) => `- ${f.name}: ${f.size}%支持`).join('\n') : '暂无数据'}
-
-## 重大事件时间轴
-
-${events}
-
-## 已识别事件链
-
-${eventChains || '暂无'}`;
-
-  return { system, intro };
-}
-
-// ===== Helpers =====
-
-function safeParse(s: string | null): string[] {
-  if (!s) return [];
-  try { return JSON.parse(s); } catch { return []; }
-}
+// ===== Continuity extraction =====
 
 function formatContinuity(continuity?: ContinuityBible): string {
   if (!continuity) return '暂无连续性档案。';
@@ -206,9 +195,6 @@ function formatContinuity(continuity?: ContinuityBible): string {
     `未解决伏笔：${continuity.unresolvedThreads?.join('；') || '未记录'}`,
     `进行中的事件链：${continuity.activeEventChains?.join('；') || '未记录'}`,
     `已完成的事件链：${continuity.completedEventChains?.join('；') || '未记录'}`,
-    `事件链玩家选择：${continuity.eventChainChoices?.join('；') || '未记录'}`,
-    `事件链后果：${continuity.eventChainConsequences?.join('；') || '未记录'}`,
-    `未解决的事件链线索：${continuity.unresolvedEventChainClues?.join('；') || '未记录'}`,
   ].join('\n');
 }
 
@@ -222,12 +208,13 @@ async function extractChapterMemory(content: string, previous: ContinuityBible |
       unresolvedEventChainClues: [], establishedFacts: [], timelineState: '',
     },
   };
+  if (!content.trim()) return fallback;
   try {
-    const response = await completeChat([
-      { role: 'system', content: '你是长篇小说连续性编辑。只输出 JSON，不要添加 Markdown。保留仍然有效的旧信息，删除已解决的伏笔。' },
-      { role: 'user', content: `旧连续性档案：\n${JSON.stringify(previous || {})}\n\n新章节：\n${content}\n\n输出结构：{"summary":"200-350字章节概要","continuity":{"characters":["人物及当前状态"],"factions":["势力及关系"],"unresolvedThreads":["尚未解决的伏笔"],"activeEventChains":["仍在推进、尚未完结的群星事件链及当前阶段"],"completedEventChains":["已完结的事件链及其结局"],"eventChainChoices":["玩家在事件链中的关键选择"],"eventChainConsequences":["事件链选择导致的后果"],"unresolvedEventChainClues":["已知但尚未揭示的事件链线索,不可提前泄露结局"],"establishedFacts":["不可违背的既定事实"],"timelineState":"章节结束时的时间和总体局势"}}` },
+    const result = await completeChat([
+      { role: 'system', content: '你是长篇小说连续性编辑。只输出 JSON。保留仍然有效的旧信息，删除已解决的伏笔。' },
+      { role: 'user', content: `旧连续性档案：\n${JSON.stringify(previous || {})}\n\n新章节：\n${content}\n\n输出结构：{"summary":"200-350字章节概要","continuity":{"characters":["人物及当前状态"],"factions":["势力及关系"],"unresolvedThreads":["未解决伏笔"],"activeEventChains":["仍在推进的事件链及阶段"],"completedEventChains":["已完结的事件链及结局"],"eventChainChoices":["关键选择"],"eventChainConsequences":["后果"],"unresolvedEventChainClues":["线索"],"establishedFacts":["既定事实"],"timelineState":"结束时的时间和局势"}}` },
     ], config);
-    const parsed = JSON.parse(response);
+    const parsed = JSON.parse(result.text);
     return {
       summary: typeof parsed.summary === 'string' ? parsed.summary : fallback.summary,
       continuity: {
@@ -244,31 +231,4 @@ async function extractChapterMemory(content: string, previous: ContinuityBible |
       },
     };
   } catch { return fallback; }
-}
-
-function buildEventChains(milestones: { event_date: string; title: string; raw_flag: string | null }[]): string {
-  const evidence: SaveEvidence = {
-    countryFlags: new Set<string>(),
-    globalFlags: new Set<string>(),
-    planetFlags: new Set<string>(),
-    starFlags: new Set<string>(),
-    completedAnomalies: [], activeProjects: [], completedProjects: [],
-    archaeologySites: [], firedEvents: [],
-    milestoneFlags: milestones.map(m => ({ flag: m.raw_flag || '', date: m.event_date })),
-  };
-  for (const m of milestones) {
-    const flag = m.raw_flag || '';
-    if (!flag) continue;
-    if (flag.startsWith('global_')) evidence.globalFlags.add(flag);
-    else evidence.countryFlags.add(flag);
-    if (flag.match(/\.\d+$/)) evidence.firedEvents.push(flag);
-    if (flag.startsWith('anomaly_') || flag.match(/^anomaly\./)) evidence.completedAnomalies.push(flag);
-  }
-  let chains: ReturnType<typeof detectEventChains> = [];
-  try { chains = detectEventChains(evidence); } catch { chains = []; }
-  if (chains.length === 0) return '暂无可识别的多阶段事件链。';
-  return chains.map(chain => {
-    const sl = chain.status === 'completed' ? '已完成' : chain.status === 'active' ? '进行中' : chain.status === 'failed' ? '已失败' : '状态未知';
-    return `### ${chain.name} (${sl}, ${chain.category || '剧情'})\n当前阶段: ${chain.currentStage}${chain.selectedChoices.length > 0 ? `\n玩家选择: ${chain.selectedChoices.join(', ')}` : ''}`;
-  }).join('\n\n');
 }

@@ -1,6 +1,6 @@
-// AI client — Vercel AI SDK for non-streaming + raw fetch for SSE streaming
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText, type ToolSet } from 'ai';
+// AI client — Vercel AI SDK v6 with official OpenAI provider (DeepSeek compatible)
+import { createOpenAI } from '@ai-sdk/openai';
+import { streamText, generateText, stepCountIs, type ToolSet, type ModelMessage } from 'ai';
 
 export interface AIClientConfig {
   apiKey?: string;
@@ -14,6 +14,15 @@ export interface TokenUsage {
   outputTokens: number;
 }
 
+export type StreamEvent =
+  | { type: 'text-delta'; content: string }
+  | { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown }
+  | { type: 'tool-result'; toolCallId: string; toolName: string; result: unknown }
+  | { type: 'finish'; usage: TokenUsage }
+  | { type: 'error'; message: string };
+
+export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
 function resolveConfig(config?: AIClientConfig): Required<AIClientConfig> {
   return {
     apiKey: config?.apiKey || process.env.DEEPSEEK_API_KEY || '',
@@ -22,82 +31,134 @@ function resolveConfig(config?: AIClientConfig): Required<AIClientConfig> {
   };
 }
 
-/** Stream a chat completion via raw SSE (AI SDK streaming had compat issues with DeepSeek) */
-export async function* streamChat(
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
-  config?: AIClientConfig,
-  _options?: { tools?: ToolSet },
-): AsyncGenerator<{ type: 'text'; content: string }> {
+function createProvider(config?: AIClientConfig) {
   const cfg = resolveConfig(config);
-  console.log('[streamChat] sending', messages.length, 'messages, model:', cfg.model);
-  const response = await fetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-    body: JSON.stringify({ model: cfg.model, messages, stream: true, temperature: 0.8, max_tokens: 4096 }),
+  const baseURL = cfg.baseUrl.replace(/\/$/, '');
+  return createOpenAI({
+    apiKey: cfg.apiKey,
+    baseURL,
   });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`AI API 错误 (${response.status}): ${errText.slice(0, 500)}`);
-  }
-
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let rawChunks = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed === 'data: [DONE]') continue;
-      if (!trimmed.startsWith('data: ')) continue;
-      rawChunks++;
-      try {
-        const json = JSON.parse(trimmed.slice(6));
-        const content = json.choices?.[0]?.delta?.content;
-        if (content) yield { type: 'text', content };
-        else if (json.choices?.[0]?.finish_reason) {
-          console.log('[streamChat] finish_reason:', json.choices[0].finish_reason);
-        }
-      } catch { /* skip */ }
-    }
-  }
-  console.log('[streamChat] total SSE chunks:', rawChunks);
 }
 
-/** Non-streaming chat completion (AI SDK) */
-export async function completeChat(
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+function extractPrompt(messages: ChatMessage[]): { system?: string; messages: ModelMessage[] } {
+  const systemParts: string[] = [];
+  const promptMessages: ModelMessage[] = [];
+  for (const msg of messages) {
+    if (msg.role === 'system') { if (msg.content.trim()) systemParts.push(msg.content.trim()); continue; }
+    if (msg.role === 'user') { promptMessages.push({ role: 'user', content: msg.content }); continue; }
+    promptMessages.push({ role: 'assistant', content: msg.content });
+  }
+  return { system: systemParts.length > 0 ? systemParts.join('\n\n') : undefined, messages: promptMessages };
+}
+
+function normalizeUsage(usage?: { inputTokens?: number; cachedInputTokens?: number; outputTokens?: number } | null): TokenUsage {
+  return { inputTokens: usage?.inputTokens ?? 0, cachedInputTokens: usage?.cachedInputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0 };
+}
+
+/** Streaming chat with tools via AI SDK. Uses provider.chat() to force /chat/completions endpoint (DeepSeek doesn't support /responses). */
+export async function* streamChatWithTools(
+  messages: ChatMessage[],
   config?: AIClientConfig,
-): Promise<string> {
+  options?: { tools?: ToolSet; maxSteps?: number },
+): AsyncGenerator<StreamEvent> {
   const cfg = resolveConfig(config);
-  const provider = createOpenAICompatible({ name: 'deepseek', baseURL: cfg.baseUrl.replace(/\/$/, ''), apiKey: cfg.apiKey });
+  const provider = createProvider(config);
+  const prompt = extractPrompt(messages);
+
+  const result = streamText({
+    model: provider.chat(cfg.model),
+    system: prompt.system,
+    messages: prompt.messages,
+    tools: options?.tools,
+    temperature: 0.8,
+    maxOutputTokens: 32768,
+    stopWhen: options?.tools ? stepCountIs(options.maxSteps ?? 12) : undefined,
+  });
+
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case 'text-delta':
+        if (part.text) yield { type: 'text-delta', content: part.text };
+        break;
+      case 'tool-call':
+        yield { type: 'tool-call', toolCallId: part.toolCallId, toolName: part.toolName, args: part.input };
+        break;
+      case 'tool-result':
+        yield { type: 'tool-result', toolCallId: part.toolCallId, toolName: part.toolName, result: part.output };
+        break;
+      case 'error':
+        yield { type: 'error', message: part.error instanceof Error ? part.error.message : String(part.error || '流式错误') };
+        return;
+      case 'finish':
+        yield { type: 'finish', usage: normalizeUsage(part.totalUsage) };
+        return;
+    }
+  }
+}
+
+/** Streaming chat WITHOUT tools. Returns text-delta and finish events only. */
+export async function* streamChatPlain(
+  messages: ChatMessage[],
+  config?: AIClientConfig,
+  options?: { maxOutputTokens?: number },
+): AsyncGenerator<StreamEvent> {
+  const cfg = resolveConfig(config);
+  const provider = createProvider(config);
+  const prompt = extractPrompt(messages);
+
+  const result = streamText({
+    model: provider.chat(cfg.model),
+    system: prompt.system,
+    messages: prompt.messages,
+    temperature: 0.8,
+    maxOutputTokens: options?.maxOutputTokens ?? 16384,
+  });
+
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case 'text-delta':
+        if (part.text) yield { type: 'text-delta', content: part.text };
+        break;
+      case 'error':
+        yield { type: 'error', message: part.error instanceof Error ? part.error.message : String(part.error || '流式错误') };
+        return;
+      case 'finish':
+        yield { type: 'finish', usage: normalizeUsage(part.totalUsage) };
+        return;
+    }
+  }
+}
+
+/** Non-streaming completion with optional tools */
+export async function completeChat(
+  messages: ChatMessage[],
+  config?: AIClientConfig,
+  options?: { tools?: ToolSet },
+): Promise<{ text: string; usage?: TokenUsage }> {
+  const cfg = resolveConfig(config);
+  const provider = createProvider(config);
+  const prompt = extractPrompt(messages);
   const result = await generateText({
-    model: provider.chatModel(cfg.model),
-    messages,
+    model: provider.chat(cfg.model),
+    system: prompt.system,
+    messages: prompt.messages,
+    tools: options?.tools,
     temperature: 0.2,
     maxOutputTokens: 1400,
   });
-  return result.text;
+  return { text: result.text, usage: result.usage ? normalizeUsage(result.usage) : undefined };
 }
 
-/** Test API connection (AI SDK) */
+/** Test connection */
 export async function testConnection(config?: AIClientConfig): Promise<{ ok: boolean; message: string }> {
   try {
     const cfg = resolveConfig(config);
-    const provider = createOpenAICompatible({ name: 'deepseek', baseURL: cfg.baseUrl.replace(/\/$/, ''), apiKey: cfg.apiKey });
+    const provider = createProvider(config);
     const result = await generateText({
-      model: provider.chatModel(cfg.model),
+      model: provider.chat(cfg.model),
       messages: [{ role: 'user', content: '回答"连接成功"四个字即可' }],
       maxOutputTokens: 10,
     });
     return { ok: true, message: result.text || '连接成功' };
-  } catch (e: any) {
-    return { ok: false, message: e.message || '连接失败' };
-  }
+  } catch (e: any) { return { ok: false, message: e.message || '连接失败' }; }
 }
