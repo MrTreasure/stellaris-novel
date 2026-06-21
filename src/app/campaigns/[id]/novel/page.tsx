@@ -42,6 +42,8 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
   const [showPromptPreview, setShowPromptPreview] = useState(false);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
+  const [outline, setOutline] = useState('');
+  const [generatingOutline, setGeneratingOutline] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,6 +56,11 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
         setContinuity(localNovel.continuity);
         setBgSettings(localNovel.background);
         setBgEnabled(localNovel.backgroundEnabled);
+        setOutline(localNovel.outline || '');
+        // Auto-generate outline on first visit if none exists
+        if (!localNovel.outline && localNovel.chapters.length === 0) {
+          setTimeout(() => generateOutline(), 500);
+        }
         if (localNovel.chapters.length > 0) {
           setCurrentChapter(localNovel.chapters.at(-1)?.chapter_number || 0);
         }
@@ -80,6 +87,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
       title: `${campaignName}史诗`,
       background,
       backgroundEnabled: enabled,
+      outline,
       messages: nextMessages ?? messages,
       chapters: nextChapters,
       continuity,
@@ -140,6 +148,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
       const newUserMsg: NovelMessage = {
         role: 'user',
         content: [
+          outline ? `## 章节大纲\n${outline}` : '',
           bgEnabled && bgSettings ? `## 额外背景设定\n${bgSettings}` : '',
           `## 长篇连续性档案\n${brief}`,
           `## 最近一章摘要\n${latestChapter?.summary || '暂无'}`,
@@ -215,6 +224,7 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
                 title: `${campaignName}史诗`,
                 background: bgSettings,
                 backgroundEnabled: bgEnabled,
+                outline,
                 messages: nextMessages,
                 chapters: nextChapters,
                 continuity: nextContinuity,
@@ -247,6 +257,31 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
     a.download = `${campaignName}史诗.md`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  const generateOutline = async () => {
+    const config = loadAIConfig();
+    if (!config.apiKey) { setError('请先配置 API Key'); return; }
+    setGeneratingOutline(true); setError('');
+    try {
+      const r = await fetch('/api/novels/generate?campaign_id=' + campaignId);
+      const d = await r.json();
+      const sysMsg = d.messages?.find((m: any) => m.role === 'system');
+      const userMsg = d.messages?.find((m: any) => m.role === 'user');
+      const response = await fetch('/api/novels/generate/outline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ system: sysMsg?.content, user: userMsg?.content, config }),
+      });
+      const result = await response.json();
+      if (result.outline) {
+        setOutline(result.outline);
+        await saveLocalNovel({ campaignId, title: `${campaignName}史诗`, background: bgSettings, backgroundEnabled: bgEnabled, outline: result.outline, messages, chapters, continuity, updatedAt: new Date().toISOString() });
+      } else {
+        setError(result.error || '大纲生成失败');
+      }
+    } catch (e: any) { setError(e.message); }
+    finally { setGeneratingOutline(false); }
   };
 
   const loadPromptPreview = async () => {
@@ -319,6 +354,10 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
           <button onClick={() => setShowMemory(true)} className="secondary-button w-full">
             <BookIcon className="h-4 w-4" />连续性档案
           </button>
+          <button onClick={generateOutline} disabled={generatingOutline} className="secondary-button w-full">
+            <SparkIcon className="h-4 w-4" />{generatingOutline ? '生成中...' : outline ? '重新生成大纲' : '生成章节大纲'}
+          </button>
+          {outline && <p className="px-1 text-[10px] leading-4 text-[#5f7b7d]">大纲已生成，将在续写时注入提示词</p>}
           <button onClick={loadPromptPreview} disabled={loadingPreview} className="secondary-button w-full">
             <SparkIcon className="h-4 w-4" />{loadingPreview ? '加载中...' : '模型提示词预览'}
           </button>
@@ -430,17 +469,17 @@ export default function NovelPage({ params }: { params: Promise<{ id: string }> 
 
       {showPromptPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="preview-title">
-          <div className="panel flex max-h-[92vh] w-full max-w-6xl flex-col p-6 sm:p-8">
-            <div className="flex items-start justify-between gap-4">
+          <div className="panel flex h-[92vh] w-full max-w-6xl flex-col p-6 sm:p-8">
+            <div className="flex items-start justify-between gap-4 shrink-0">
               <div>
                 <h2 id="preview-title" className="text-xl font-semibold text-[#dbeae8]">完整提示词预览</h2>
-                <p className="mt-2 text-sm text-[#829c9e]">以下为发送给 AI 模型的完整提示词，包含系统指令和用户数据。可复制用于调试。提示词中含 3 个工具定义（search_game_knowledge / lookup_event_chain / lookup_technology），模型遇到陌生名词时会自动查询。</p>
+                <p className="mt-2 text-sm text-[#829c9e]">以下为发送给 AI 模型的完整提示词，可复制用于调试。含 3 个工具定义。</p>
               </div>
-              <button onClick={() => setShowPromptPreview(false)} className="secondary-button shrink-0">关闭</button>
             </div>
-            <textarea readOnly value={promptPreview}
-              className="field mt-4 flex-1 min-h-[750px] resize-none font-mono text-xs leading-5" />
-            <div className="mt-4 flex justify-end gap-3">
+            <textarea value={promptPreview} onChange={e => setPromptPreview(e.target.value)}
+              className="field mt-4 flex-1 min-h-0 resize-none font-mono text-xs leading-5"
+              placeholder="加载中..." />
+            <div className="mt-4 flex shrink-0 justify-end gap-3">
               <button onClick={() => navigator.clipboard.writeText(promptPreview)} className="secondary-button">复制到剪贴板</button>
               <button onClick={() => setShowPromptPreview(false)} className="primary-button">关闭</button>
             </div>

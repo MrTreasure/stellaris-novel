@@ -41,6 +41,7 @@ export interface LocalNovel {
   title: string;
   background: string;
   backgroundEnabled: boolean;
+  outline: string;
   messages: NovelMessage[];
   chapters: LocalChapter[];
   continuity: ContinuityBible;

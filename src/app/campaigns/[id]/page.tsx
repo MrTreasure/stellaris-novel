@@ -17,10 +17,11 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reloadData = () => {
-    fetch(`/api/campaigns/${id}`).then(r => r.json()).then(setData).catch(e => setError(e.message));
+    fetch(`/api/campaigns/${id}`).then(r => r.json()).then(d => { setData(d); setLoaded(true); }).catch(e => setError(e.message));
   };
 
   useEffect(() => {
+    setLoaded(false);
     reloadData();
     loadLocalNovel(parseInt(id)).then(setLocalNovel);
   }, [id]);
@@ -146,31 +147,7 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
           </div>
           <span className="font-mono text-xs tracking-wider text-[#668486]">{milestones.length} EVENTS</span>
         </div>
-        <div className="relative mt-6 max-h-[70vh] space-y-0.5 overflow-y-auto border-l border-[#38666a] pl-5">
-          {milestones.filter((m: any) => !m.event_date?.startsWith('0.') && !m.event_date?.startsWith('1.01')).map((m: any, i: number) => (
-            <div key={m.id || i} className="relative pb-1">
-              <div className={`absolute -left-[25px] top-2 h-2 w-2 rotate-45 border border-[#06141e] ${
-                m.importance === 'critical' ? 'bg-[#db7168]' :
-                m.importance === 'major' ? 'bg-[#64d9cf]' : 'bg-[#42686a]'
-              }`} />
-              <div className="flex items-start gap-3 py-1">
-                <span className="mt-0.5 w-20 shrink-0 font-mono text-[13px] text-[#789496]">{m.event_date}</span>
-                <div className="min-w-0 flex-1">
-                  <span className={`inline-flex border px-2 py-0.5 text-[10px] font-semibold tracking-wider ${eventTagClass(m.event_type)}`}>
-                    {eventTagLabel(m.event_type)}
-                  </span>
-                  <p className={`mt-1 text-base leading-7 sm:text-[17px] ${
-                  m.event_type === 'war' ? 'text-[#d9c07d]' :
-                  m.event_type === 'crisis' ? 'text-[#e59a92]' :
-                  m.event_type === 'megastructure' ? 'text-[#b4bced]' :
-                  m.event_type === 'exploration' ? 'text-[#88d9d2]' :
-                  'text-[#b2c3c2]'
-                  }`}>{m.title}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <ChronicleByYear milestones={milestones} eventTagLabel={eventTagLabel} eventTagClass={eventTagClass} />
       </section>
 
       <section className="mt-8">
@@ -196,6 +173,72 @@ export default function CampaignPage({ params }: { params: Promise<{ id: string 
   );
 }
 
+function ChronicleByYear({ milestones, eventTagLabel, eventTagClass }: { milestones: any[]; eventTagLabel: (t: string) => string; eventTagClass: (t: string) => string }) {
+  // Group milestones by year (extract year number from date string)
+  const groups = new Map<string, any[]>();
+  const noDate: any[] = [];
+  for (const m of milestones) {
+    if (!m.event_date || m.event_date.startsWith('0.') || m.event_date.startsWith('1.01')) continue;
+    const year = m.event_date.match(/^\d+/)?.[0] || m.event_date;
+    if (year.length <= 2) { noDate.push(m); continue; }
+    if (!groups.has(year)) groups.set(year, []);
+    groups.get(year)!.push(m);
+  }
+  const sortedYears = [...groups.keys()].sort((a, b) => parseInt(a) - parseInt(b));
+
+  return (
+    <div className="relative mt-6 max-h-[70vh] space-y-6 overflow-y-auto border-l border-[#38666a] pl-5">
+      {sortedYears.map(year => {
+        const events = groups.get(year)!;
+        events.sort((a, b) => {
+          const ia = a.importance === 'critical' ? 0 : a.importance === 'major' ? 1 : 2;
+          const ib = b.importance === 'critical' ? 0 : b.importance === 'major' ? 1 : 2;
+          return ia - ib;
+        });
+        return (
+          <div key={year} className="relative">
+            <div className="absolute -left-[29px] top-0 h-4 w-4 rotate-45 border-2 border-[#38666a] bg-[#06141e]" />
+            <h3 className="mb-3 font-mono text-lg font-semibold tracking-wider text-[#7be5d9]">{year}</h3>
+            <div className="space-y-1.5">
+              {events.map(m => {
+                const color = m.event_type === 'war' ? 'text-[#d9c07d]' :
+                  m.event_type === 'crisis' ? 'text-[#e59a92]' :
+                  m.event_type === 'megastructure' ? 'text-[#b4bced]' :
+                  m.event_type === 'exploration' ? 'text-[#88d9d2]' :
+                  'text-[#b2c3c2]';
+                return (
+                  <div key={m.id} className="flex items-start gap-3 rounded border border-[#1a3a3d]/60 bg-[#06141d]/50 px-3 py-1.5">
+                    <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${eventTagClass(m.event_type)}`}>
+                      {eventTagLabel(m.event_type)}
+                    </span>
+                    <p className={`text-sm leading-6 ${color}`}>{m.title}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {noDate.length > 0 && (
+        <div className="relative">
+          <div className="absolute -left-[29px] top-0 h-4 w-4 rotate-45 border-2 border-[#4a6a6d] bg-[#06141e]" />
+          <h3 className="mb-3 font-mono text-lg font-semibold tracking-wider text-[#608285]">当前状态</h3>
+          <div className="space-y-1.5">
+            {noDate.map(m => (
+              <div key={m.id} className="flex items-start gap-3 rounded border border-[#1a3a3d]/60 bg-[#06141d]/50 px-3 py-1.5">
+                <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wider ${eventTagClass(m.event_type)}`}>
+                  {eventTagLabel(m.event_type)}
+                </span>
+                <p className="text-sm leading-6 text-[#b2c3c2]">{m.title}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function eventTagLabel(type: string) {
   const labels: Record<string, string> = {
     war: '战争',
@@ -205,6 +248,7 @@ function eventTagLabel(type: string) {
     diplomacy: '外交',
     colonization: '殖民',
     technology: '科技',
+    tech: '科技',
     leader: '领袖',
   };
   return labels[type] || '事件';
@@ -219,6 +263,7 @@ function eventTagClass(type: string) {
     diplomacy: 'border-[#56789b] bg-[#1c344d]/60 text-[#9bc4ea]',
     colonization: 'border-[#59835e] bg-[#1f4227]/60 text-[#9bd4a0]',
     technology: 'border-[#6d6193] bg-[#31264c]/60 text-[#c0ace9]',
+    tech: 'border-[#6d6193] bg-[#31264c]/60 text-[#c0ace9]',
     leader: 'border-[#8c704c] bg-[#49341b]/60 text-[#dab878]',
   };
   return classes[type] || 'border-[#496669] bg-[#173035]/60 text-[#9cb6b7]';

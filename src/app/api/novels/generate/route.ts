@@ -1,11 +1,10 @@
 import { NextRequest } from 'next/server';
 import { getCampaign, getSaves, getMilestones } from '@/lib/db';
-import { completeChat, streamChat, type TokenUsage } from '@/lib/ai-client';
-import { novelTools } from '@/lib/ai-tools';
+import { completeChat, streamChat } from '@/lib/ai-client';
 import type { ContinuityBible } from '@/lib/browser-storage';
 import { loadLore } from '@/lib/lore';
 import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
-import type { ToolSet } from 'ai';
+import { novelTools } from '@/lib/ai-tools';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,8 +49,7 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const generator = streamChat(finalMessages, config, { tools: novelTools as ToolSet });
-          let result: { usage: TokenUsage } | null = null;
+          const generator = streamChat(finalMessages, config, { tools: novelTools });
 
           for await (const event of generator) {
             if (event.type === 'text') {
@@ -59,11 +57,6 @@ export async function POST(req: NextRequest) {
               controller.enqueue(encoder.encode(JSON.stringify({ type: 'chunk', content: event.content }) + '\n'));
             }
           }
-
-          // Get token usage from the generator return value
-          try {
-            result = (await generator.return(undefined as any))?.value as any;
-          } catch {}
 
           // Extract continuity memory
           const memory = await extractChapterMemory(fullContent, continuity, config);
@@ -74,11 +67,11 @@ export async function POST(req: NextRequest) {
             mode: mode || 'new',
             summary: memory.summary,
             continuity: memory.continuity,
-            usage: result?.usage || { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 },
           }) + '\n'));
           controller.close();
         } catch (e: any) {
-          controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: e.message }) + '\n'));
+          console.error('Generate error:', e?.message || e, e?.stack?.slice(0, 300));
+          controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error: 'AI 生成失败，请检查 API 配置和网络连接。错误: ' + (e?.message || '') }) + '\n'));
           controller.close();
         }
       },
@@ -88,7 +81,8 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
     });
   } catch (e: any) {
-    return new Response(e.message, { status: 500 });
+    console.error('Generate route error:', e.message);
+    return new Response('服务器内部错误', { status: 500 });
   }
 }
 

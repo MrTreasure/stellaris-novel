@@ -15,16 +15,18 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     if (!file) return NextResponse.json({ error: '请上传存档文件' }, { status: 400 });
+    if (!file.name.endsWith('.sav')) return NextResponse.json({ error: '仅支持 .sav 格式' }, { status: 400 });
+    if (file.size > 200 * 1024 * 1024) return NextResponse.json({ error: '文件过大' }, { status: 400 });
 
-    // 保存到临时目录
+    const safeName = path.basename(file.name.replace(/[^a-zA-Z0-9_.-]/g, '_'));
     const tmpDir = path.join(process.cwd(), 'data', 'tmp');
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const tmpPath = path.join(tmpDir, file.name);
+    const tmpPath = path.join(tmpDir, safeName);
     const buffer = Buffer.from(await file.arrayBuffer());
     fs.writeFileSync(tmpPath, buffer);
 
-    // 解析存档
-    const parsed = parseSaveFile(tmpPath);
+    try {
+      const parsed = parseSaveFile(tmpPath);
 
     // 获取或创建战役
     const campaignName = formData.get('campaign_name')?.toString() || `${parsed.empire_name}战役`;
@@ -95,16 +97,18 @@ export async function POST(req: NextRequest) {
       insertMilestones(warMilestones);
     }
 
-    // 清空临时文件
-    fs.unlinkSync(tmpPath);
-
     return NextResponse.json({
       ok: true,
       campaign_id: campaignId,
       save_id: saveId,
       parsed,
     });
+    } catch (e: any) {
+      return NextResponse.json({ error: '存档解析失败' }, { status: 500 });
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: '服务器内部错误' }, { status: 500 });
   }
 }

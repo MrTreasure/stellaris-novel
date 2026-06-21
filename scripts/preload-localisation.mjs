@@ -22,12 +22,23 @@ function cleanLocValue(text, locMap) {
   return cleaned.trim() || text;
 }
 
+/** Recursively walk a directory and yield all .yml file paths */
+function* walkYamlFiles(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) yield* walkYamlFiles(full);
+    else if (entry.name.endsWith('.yml')) yield full;
+  }
+}
+
 function parseAllYamlFiles(locDir) {
   const result = new Map();
-  for (const f of readdirSync(locDir).filter(f => f.endsWith('.yml'))) {
-    const content = readFileSync(join(locDir, f), 'utf-8');
+  for (const filePath of walkYamlFiles(locDir)) {
+    const content = readFileSync(filePath, 'utf-8');
     for (const line of content.split('\n')) {
-      const t = line.trim();
+      // Strip inline comments
+      const stripped = line.replace(/\s+#.*$/, '');
+      const t = stripped.trim();
       if (!t || t.startsWith('#') || t.startsWith('l_')) continue;
       const m = t.match(/^([\w.]+):\s+"(.+)"$/) || t.match(/^([\w.]+):\d+\s+"(.+)"$/);
       if (!m) continue;

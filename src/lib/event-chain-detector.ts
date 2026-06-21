@@ -111,35 +111,38 @@ function evaluateChain(
   let status: DetectedEventChain['status'] = 'unknown';
   let currentStage = '';
 
-  if (observedNodes.length === 0) {
-    // Check if any flag from this chain exists at all (might be hidden)
-    const chainStartFlags = extractChainStartFlags(chain.chain_id);
-    const hasAnyFlag = chainStartFlags.some(f => allFlags.has(f));
-    if (!hasAnyFlag) return null; // This chain hasn't started at all
+  // Check for known chain completion flags first
+  const startFlags = extractChainStartFlags(chain.chain_id);
+  const hasAnyFlag = startFlags.some(f => allFlags.has(f));
+  const completedFlags = extractChainCompletionFlags(chain.chain_id);
+  const hasCompletionFlag = completedFlags.some(f => allFlags.has(f));
+
+  if (hasCompletionFlag) {
+    status = 'completed';
+    currentStage = '已完成';
+  } else if (observedNodes.length === 0 && sortedNodes.length === 0) {
+    if (!hasAnyFlag) return null;
     status = 'active';
-    currentStage = '未知阶段';
-  } else if (sortedNodes.length === 0) {
-    // Native chains with no nodes tracked — use flags
+    const matchedFlags = startFlags.filter(f => allFlags.has(f));
+    currentStage = matchedFlags.length > 0 ? `进行中 (${matchedFlags.length} 个标记)` : '进行中';
+  } else if (observedNodes.length === 0 && sortedNodes.length > 0) {
+    if (!hasAnyFlag) return null;
     status = 'active';
-    currentStage = '进行中';
-  } else {
+    currentStage = '起始阶段';
+  } else if (observedNodes.length > 0) {
     const lastStage = sortedNodes[sortedNodes.length - 1];
     const lastObserved = observedNodes[observedNodes.length - 1];
-
     const lastObservedStage = sortedNodes.find(n => n.node_id === lastObserved);
-    if (lastObservedStage?.stage_type === 'ending') {
+
+    if (lastObservedStage?.stage_type === 'ending' || lastObserved === lastStage?.node_id) {
       status = 'completed';
-      currentStage = `结局: ${lastStage.stage_type}`;
-    } else if (lastObserved && lastStage.node_id !== lastObserved) {
-      status = 'active';
-      // Find current stage
-      const lastIdx = sortedNodes.findIndex(n => n.node_id === lastObserved);
-      currentStage = lastIdx >= 0 && sortedNodes[lastIdx + 1]
-        ? `阶段 ${sortedNodes[lastIdx].stage_order}/${sortedNodes.length}`
-        : `阶段 ${lastObservedStage?.stage_order || '?'}/${sortedNodes.length}`;
+      currentStage = '已完成';
     } else {
       status = 'active';
-      currentStage = '进行中';
+      const lastIdx = sortedNodes.findIndex(n => n.node_id === lastObserved);
+      currentStage = lastIdx >= 0
+        ? `阶段 ${sortedNodes[lastIdx].stage_order}/${sortedNodes.length}`
+        : `已观察 ${observedNodes.length} 个节点`;
     }
   }
 
@@ -155,11 +158,10 @@ function evaluateChain(
   }
 
   // Find timestamp info from milestone flags
-  const chainFlags = extractChainStartFlags(chain.chain_id);
   let startedAt: string | undefined;
   let updatedAt: string | undefined;
   for (const mf of evidence.milestoneFlags) {
-    if (chainFlags.some(cf => mf.flag.toLowerCase().includes(cf.toLowerCase()))) {
+    if (startFlags.some(cf => mf.flag.toLowerCase().includes(cf.toLowerCase()))) {
       if (!startedAt) startedAt = mf.date;
       updatedAt = mf.date;
     }
@@ -177,6 +179,35 @@ function evaluateChain(
     startedAt,
     updatedAt,
   };
+}
+
+/** Extract completion flags for known chain types */
+function extractChainCompletionFlags(chainId: string): string[] {
+  const lower = chainId.toLowerCase();
+  const patterns: Record<string, string[]> = {
+    'yuht_chain': ['yuht_homeworld_found', 'yuht_finished'],
+    'vultaum_chain': ['vultaum_homeworld_found', 'vultaum_finished'],
+    'cybrex_chain': ['cybrex_homeworld_found', 'cybrex_finished'],
+    'first_league_chain': ['first_league_found', 'first_league_finished'],
+    'irassian_chain': ['irassian_homeworld_found', 'irassian_finished'],
+    'baol_chain': ['baol_finished', 'the_last_baol'],
+    'zroni_chain': ['zroni_finished'],
+    'great_khan': ['great_khan_dead', 'khan_dead'],
+    'prethoryn': ['prethoryn_defeated', 'scourge_defeated'],
+    'unbidden': ['unbidden_defeated'],
+    'contingency': ['contingency_defeated'],
+    'war_in_heaven': ['war_in_heaven_ended'],
+    'subterranean': ['subterranean_finished'],
+    'migrating_forests': ['migrating_forests_finished'],
+    'abandoned_terraforming': ['abandoned_terraforming_finished'],
+    'rubricator': ['rubricator_finished'],
+    'horizon_signal': ['horizon_signal_finished', 'worm_in_waiting_finished'],
+    'synth_queen': ['synth_queen_finished', 'synth_queen_defeated'],
+  };
+  if (patterns[lower]) return patterns[lower];
+  // Generic completion patterns
+  const base = lower.replace(/_chain$/, '');
+  return [`${base}_finished`, `${base}_completed`, `${base}_found`, `${base}_ended`, `${base}_defeated`];
 }
 
 /** Extract likely flag names associated with a chain */

@@ -1,9 +1,54 @@
-// Flag name → Chinese title mapping (with DB enrichment for anomalies etc.)
+// Flag name → Chinese title mapping (with bulk DB enrichment)
 // Covers Butler v2.x and Corvus v4.x format flags
 
 import type { DatabaseSync } from 'node:sqlite';
 
+let _locMap: Map<string, string> | null = null;
+let _flagTitleMap: Map<string, string> | null = null;
+let _mapsLoaded = false;
+
+/** Bulk-load game_data + event graph flag titles into memory (called once per process) */
+export function loadLocMap(db: DatabaseSync): Map<string, string> {
+  if (_mapsLoaded) return _locMap!;
+
+  _locMap = new Map<string, string>();
+  try {
+    const rows = db.prepare('SELECT key, zh_name FROM game_data WHERE zh_name IS NOT NULL AND zh_name != \'\'').all() as { key: string; zh_name: string }[];
+    for (const r of rows) _locMap.set(r.key, r.zh_name);
+  } catch { /* table might not exist yet */ }
+
+  // Build flag→title map from event graph: for each flag, find the event node that sets it
+  _flagTitleMap = new Map<string, string>();
+  try {
+    const rows = db.prepare(
+      `SELECT DISTINCT f.flag_name, n.zh_title FROM game_event_flags f
+       JOIN game_event_nodes n ON f.node_id = n.id
+       WHERE f.operation = 'set' AND n.zh_title IS NOT NULL AND n.zh_title != ''`
+    ).all() as { flag_name: string; zh_title: string }[];
+    for (const r of rows) {
+      if (!_flagTitleMap.has(r.flag_name.toLowerCase())) {
+        _flagTitleMap.set(r.flag_name.toLowerCase(), r.zh_title);
+      }
+    }
+  } catch { /* table might not exist */ }
+
+  _mapsLoaded = true;
+  return _locMap!;
+}
+
+function getFlagTitleMap(): Map<string, string> | null {
+  if (_mapsLoaded) return _flagTitleMap;
+  return null;
+}
+
+function getLocMap(db?: DatabaseSync): Map<string, string> | null {
+  if (_mapsLoaded) return _locMap;
+  if (db) return loadLocMap(db);
+  return null;
+}
+
 function translateFlag(flag: string, db?: DatabaseSync): string {
+  const locMap = getLocMap(db);
   const m: Record<string, string> = {
     // === Core milestones ===
     first_colony: '🏗️ 建立第一个外星殖民地',
@@ -180,6 +225,55 @@ function translateFlag(flag: string, db?: DatabaseSync): string {
     mercenary_enclave_leader: '🎖️ 佣兵飞地领袖',
     wrecked_fleet_chain: '🚢 漂流舰队',
     fleet_maneuvers: '🚢 舰队演习',
+    lost_colony_found_homeworld: '🌍 发现失落殖民地母星',
+    lost_colony_parent: '🔭 发现失落殖民地来源',
+    yuht_homeworld_found: '🏺 发现尤特母星',
+    horror_spawned: '👾 星际恐魔出现',
+    colony_event: '🌍 殖民地事件',
+    mega_shipyard_built: '🚢 巨型船坞建成',
+    has_habitat: '🏠 拥有轨道居住站',
+    artifact_yuht_research_completed: '🏺 尤特遗物研究完成',
+    yuht_research_started: '🏺 开始尤特研究',
+    yuht_world_found: '🏺 发现尤特世界',
+    yuht_intro: '🏺 尤特线索发现',
+    yuht_6: '🏺 尤特线索 #6',
+    yuht_9: '🏺 尤特线索 #9',
+    yuhtaan: '🏺 尤坦',
+    jabbardeeni_cache: '🏺 贾巴迪尼遗物',
+    Story8: '📖 先驱者第八章',
+    first_100k_fleet: '🚢 舰队战力突破10万',
+    first_terraform: '🌍 首次环境改造',
+    first_titan: '🚢 首艘泰坦',
+    first_gateway: '🚪 发现首座星门',
+    first_wormhole: '🌀 发现首个虫洞',
+    first_vassal: '🔗 首次获得附庸',
+    first_relic: '🏺 获得首件遗珍',
+    first_repeatable_tech: '🔬 完成首项循环科技',
+    first_storm_appears_within_borders: '⛈️ 帝国境内首次出现风暴',
+    federation_formed: '🤝 联邦成立',
+    first_federation_formed: '🤝 首次组建联邦',
+    joined_council: '🏛️ 加入星海理事会',
+    encountered_solarpunk: '👽 遭遇太阳朋克文明',
+    galactic_community_resolution_passed: '🌐 星海共同体决议通过',
+    crystal_sphere_sent: '💎 晶态球体已发送',
+    precursor_adakkaria: '🏺 先驱者: 阿达卡里亚',
+    precursor_1: '🏺 先驱者线索 #1',
+    precursor_2: '🏺 先驱者线索 #2',
+    precursor_3: '🏺 先驱者线索 #3',
+    precursor_4: '🏺 先驱者线索 #4',
+    precursor_5: '🏺 先驱者线索 #5',
+    precursor_system: '🏺 发现先驱者星系',
+    precursor_world: '🏺 发现先驱者母星',
+    precursor_zroni_1: '🏺 先驱者: 泽珞族',
+    precursor_collector_fired: '🏺 先驱者收集器激活',
+    first_precursor: '🏺 首次发现先驱者',
+    yuht_system: '🏺 尤特星系',
+    yuht_system_discovered: '🏺 发现尤特星系',
+    yuht_homeworld: '🏺 尤特母星',
+    dimensional_horror: '👾 异次元恐魔',
+    met_ubume: '👽 遇见乌布姆',
+    phasphifting: '🌀 相位转换',
+    caravaneer_home: '🐫 商队母星系',
     should_not_have_upkeep: '💰 免除维持费',
     no_more_amoeba_garrison_spawns: '🦠 变形虫驻军停止',
     mining_drone_expansion_country: '🤖 采矿无人机扩张',
@@ -198,8 +292,6 @@ function translateFlag(flag: string, db?: DatabaseSync): string {
     horde_triggered: '大可汗部落崛起',
     cosmic_storm_has_occurred: '宇宙风暴爆发',
     zro_deposit_spawned: '发现卓尘矿藏',
-    yuht_system_discovered: '发现尤特星系',
-    yuht_homeworld_found: '发现尤特母星',
     enigmatic_cache_ship: '神秘缓存舰出现',
     dimensional_fleet: '异次元舰队出现',
     aggressive_drone_expansion_fleet: '激进无人机扩张舰队出现',
@@ -227,6 +319,51 @@ function translateFlag(flag: string, db?: DatabaseSync): string {
 
   if (m[flag]) return m[flag];
   if (m[flag.toLowerCase()]) return m[flag.toLowerCase()];
+
+  // Lookup from event graph flag→title map (only for exact flag name matches)
+  const ftMap = getFlagTitleMap();
+  if (ftMap && ftMap.size > 0) {
+    const found = ftMap.get(flag.toLowerCase());
+    if (found) return found;
+  }
+
+  // Bulk lookup from pre-loaded localization map (before generic patterns)
+  if (locMap && locMap.size > 0) {
+    const key = flag.toLowerCase();
+    let found: string | undefined;
+    // Exact match
+    found = locMap.get(key);
+    // Strip trailing numeric suffixes: first_contact_completed30 → first_contact_completed
+    if (!found) {
+      const stripped = key.replace(/\d+$/, '');
+      if (stripped !== key) found = locMap.get(stripped);
+    }
+    // Strip trailing empire IDs: establish_embassy_with_16777219 → establish_embassy_with
+    if (!found) {
+      const stripped = key.replace(/_\d{5,}$/, '');
+      if (stripped !== key) found = locMap.get(stripped);
+    }
+    // Strip known prefixes: first_X → look up X, has_X → look up X
+    if (!found) {
+      for (const prefix of ['first_', 'has_', 'is_', 'does_']) {
+        if (key.startsWith(prefix)) {
+          const rest = key.slice(prefix.length);
+          found = locMap.get(rest);
+          if (found) {
+            const prefixLabel: Record<string, string> = { first_: '首次 ', has_: '', is_: '', does_: '' };
+            found = (prefixLabel[prefix] || '') + found;
+            break;
+          }
+        }
+      }
+    }
+    // Try underscore→space
+    if (!found) {
+      const spacedKey = key.replace(/_/g, ' ');
+      if (spacedKey !== key) found = locMap.get(spacedKey);
+    }
+    if (found) return found;
+  }
 
   // Pattern-based rules
   if (flag.startsWith('fc_event_')) return `👽 首次接触事件 #${flag.slice(9)}`;
@@ -258,8 +395,8 @@ function translateFlag(flag: string, db?: DatabaseSync): string {
   if (flag.startsWith('storm')) return '⛈️ 风暴';
   if (flag.startsWith('spawned_')) return '🐛 生成事件';
   if (flag.startsWith('storage_')) return '📦 储备达标';
-  if (flag.match(/^has_/)) return '⚡ 帝国事件';
-  if (flag.match(/^first_/)) return '🎯 帝国里程碑';
+  if (flag.match(/^has_/)) return `⚡ ${humanizeFlag(flag.slice(4))}`;
+  if (flag.match(/^first_/)) return `🎯 首次 ${humanizeFlag(flag.slice(6))}`;
   if (flag.match(/^official_/)) return '🏛️ 官员事件';
   if (flag.match(/^scientist/)) return '🔬 科学家';
   if (flag.match(/^commander/)) return '🎖️ 指挥官';
@@ -269,30 +406,19 @@ function translateFlag(flag: string, db?: DatabaseSync): string {
   if (flag.match(/^establish_research_pact_with_/)) return `🔬 与 #${flag.replace('establish_research_pact_with_','')} 签订科研协议`;
   if (flag.match(/^establish_migration_pact_with_/)) return `🚶 与 #${flag.replace('establish_migration_pact_with_','')} 签订移民条约`;
   if (flag.match(/^first_contact_completed/)) return `👽 完成首次接触`;
-  if (flag.match(/^met_fallen_empire_/)) return '🏛️ 遭遇堕落帝国';
-  if (flag.match(/^fc_event_/)) return `👽 第${flag.slice(9)}次接触事件`;
-  if (flag.match(/^fumongus/)) return '🍄 真菌相关';
-  if (flag.match(/^myrmeku/)) return '🐜 蚁虫事件';
-  if (flag.match(/^hivers/)) return '🐝 蜂群事件';
-  if (flag.match(/^pyorun/)) return '🔭 Pyorun星系';
-  if (flag.match(/^cara/)) return '🏠 首都事件';
-  if (flag.match(/^seen_/)) return '👽 发现新事物';
-  if (flag.match(/^hostile_/)) return '⚠️ 敌对事件';
-  if (flag.match(/^failed_/)) return '❌ 失败';
-  if (flag.match(/^galactic_community/)) return '🌐 银河共同体';
-  if (flag.match(/^galcom/)) return '🌐 银河共同体';
-  if (flag.match(/^in_diplomacy/)) return '🤝 外交中';
-
-  // DB enrichment for anomaly IDs
-  if (db) {
-    const anomM = flag.match(/^anomaly\.(\d+)/);
-    if (anomM) {
-      try {
-        const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(`anomaly.${anomM[1]}`) as { zh_name?: string } | undefined;
-        if (row?.zh_name) return `🔬 调查: ${row.zh_name}`;
-      } catch {}
-    }
-  }
+  if (flag.match(/^met_fallen_empire_/)) return `🏛️ 遭遇堕落帝国 #${flag.replace('met_fallen_empire_','')}`;
+  if (flag.match(/^fc_event_/)) return `👽 首次接触事件 #${flag.slice(9)}`;
+  if (flag.match(/^fumongus/)) return `🍄 真菌事件: ${humanizeFlag(flag)}`;
+  if (flag.match(/^myrmeku/)) return `🐜 蚁虫事件: ${humanizeFlag(flag)}`;
+  if (flag.match(/^hivers/)) return `🐝 蜂群事件: ${humanizeFlag(flag)}`;
+  if (flag.match(/^pyorun/)) return `🔭 Pyorun星系: ${humanizeFlag(flag)}`;
+  if (flag.match(/^cara/)) return `🏠 首都事件: ${humanizeFlag(flag)}`;
+  if (flag.match(/^seen_/)) return `👽 发现: ${humanizeFlag(flag.slice(5))}`;
+  if (flag.match(/^hostile_/)) return `⚠️ 敌对: ${humanizeFlag(flag.slice(8))}`;
+  if (flag.match(/^failed_/)) return `❌ 失败: ${humanizeFlag(flag.slice(7))}`;
+  if (flag.match(/^galactic_community/)) return `🌐 银河共同体: ${humanizeFlag(flag)}`;
+  if (flag.match(/^galcom/)) return `🌐 银河共同体: ${humanizeFlag(flag)}`;
+  if (flag.match(/^in_diplomacy/)) return `🤝 外交: ${humanizeFlag(flag)}`;
 
   if (flag.endsWith('_first_contact')) return `与${humanizeFlag(flag.slice(0, -14))}首次接触`;
   if (flag.endsWith('_discovered')) return `发现${humanizeFlag(flag.slice(0, -11))}`;

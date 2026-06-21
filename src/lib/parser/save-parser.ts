@@ -3,6 +3,7 @@
 
 import AdmZip from 'adm-zip';
 import type { ParsedSave } from '@/types';
+import { isNoiseFlag } from '@/lib/noise-filter';
 
 // ===== 工具函数 =====
 
@@ -258,17 +259,38 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
   }
 
   // Fallback for Corvus v4.x format: flags are scattered throughout the file
-  if (rawFlags.length === 0) {
-    // Search file body (skip header, start from ~5000 bytes in)
-    const midPt = Math.floor(data.length * 0.4);
-    const tail = data.slice(midPt, searchEnd === data.length ? data.length : Math.min(searchEnd * 2, data.length));
-    const text = tail.toString('ascii');
+  if (rawFlags.length < 50) {
+    // Scan the entire file for flag-like patterns, not just the country section
+    const scanLimit = Math.min(data.length, 60_000_000); // cap at 60MB for performance
+    let scanPos = 5000; // skip header
     const seen = new Set<string>();
-    for (const m of text.matchAll(/\b(\w{4,40})\s*=\s*(\d{8,9})\b/g)) {
-      const name = m[1], tick = parseInt(m[2]);
-      if (tick > 60000000 && tick < 70000000 && !seen.has(name)) {
-        seen.add(name);
-        rawFlags.push({ name, tick });
+
+    // Process in chunks to avoid huge string allocations
+    const CHUNK = 5_000_000;
+    while (scanPos < scanLimit) {
+      const chunkEnd = Math.min(scanPos + CHUNK, scanLimit);
+      const text = data.toString('ascii', scanPos, chunkEnd);
+      for (const m of text.matchAll(/\b(\w{4,60})\s*=\s*(\d{8,9})\b/g)) {
+        const name = m[1], tick = parseInt(m[2]);
+        if (tick > 60000000 && tick < 70000000 && !seen.has(name)) {
+          seen.add(name);
+          rawFlags.push({ name, tick });
+          if (rawFlags.length >= 2000) break; // safety limit
+        }
+      }
+      if (rawFlags.length >= 2000) break;
+      scanPos = chunkEnd;
+    }
+    // Also scan the primary country section more thoroughly
+    if (rawFlags.length < 100 && csPos && cePos) {
+      const countryText = data.toString('ascii', csPos, Math.min(cePos || data.length, data.length));
+      for (const m of countryText.matchAll(/\b(\w{4,60})\s*=\s*(\d{8,9})\b/g)) {
+        const name = m[1], tick = parseInt(m[2]);
+        if (tick > 60000000 && tick < 70000000 && !seen.has(name)) {
+          seen.add(name);
+          rawFlags.push({ name, tick });
+          if (rawFlags.length >= 2000) break;
+        }
       }
     }
   }
@@ -276,7 +298,25 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
   const SKIP = new Set(['flag_date','flag_days','country','id','tick','type','none',
     'sector','planet','army','fleet','ship','pop','species_index',
     'random','graphical_culture','capital_scope','synced_random_seed']);
-  rawFlags = rawFlags.filter(f => !SKIP.has(f.name) && f.name.length >= 3 && !/^\d+$/.test(f.name));
+  rawFlags = rawFlags.filter(f => !SKIP.has(f.name) && f.name.length >= 3 && !/^\d+$/.test(f.name)
+    // Filter out system/planet initialization markers (not player milestones)
+    && !f.name.startsWith('planet_')
+    && !f.name.startsWith('fallen_empire_')
+    && !f.name.startsWith('fallen_hive_')
+    && !f.name.startsWith('fe_the_')
+    && !f.name.startsWith('forgotten_patrol_')
+    && !f.name.startsWith('machine_world_')
+    && !f.name.startsWith('guardians_')
+    && !f.name.endsWith('_enclave_planet')
+    && !f.name.startsWith('raid_')
+    && !f.name.startsWith('prescripted_')
+    && !f.name.match(/^(tasty|toxic|ancient_history|war_citadel)/)
+  );
+
+  // Use shared noise filter
+  rawFlags = rawFlags.filter(f => !isNoiseFlag(f.name));
+  // Filter flags with abnormal tick values (>66M = game engine internals, not event dates)
+  rawFlags = rawFlags.filter(f => f.tick <= 66000000);
 
   const catRules: [string, string][] = [
     ['built_','megastructure'],['started_first_','megastructure'],['finished_','megastructure'],
@@ -297,6 +337,16 @@ function extractFlags(data: Buffer, csPos: number | null, cePos: number | null, 
     ['found_presapients','exploration'],['living_planet','exploration'],
     ['exotic_gases','resource'],['rare_crystals','resource'],
     ['volatile_motes','resource'],['dark_matter','resource'],['zro_','resource'],
+    ['precursor_','exploration'],['first_precursor','exploration'],
+    ['ruined_','exploration'],['caravan','diplomacy'],
+    ['galactic_community','diplomacy'],['galcom','diplomacy'],
+    ['federation_','diplomacy'],['in_diplomacy','diplomacy'],
+    ['establish_','diplomacy'],['met_fallen_','diplomacy'],
+    ['leviathan_','exploration'],['enigmatic_','exploration'],
+    ['dreadnought','military'],['stellarite','military'],
+    ['shroud_','event'],['khan_','crisis'],['horde_','crisis'],
+    ['bemat_','exploration'],['worm_','exploration'],
+    ['destroyer_','exploration'],
   ];
   function cat(name: string): string { for (const [p,c] of catRules) if (name.startsWith(p)) return c; return 'other'; }
 

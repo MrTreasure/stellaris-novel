@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCampaign, getSaves, getMilestones, getChapters, getNovels, getAllEventChains, getEventChainNodes } from '@/lib/db';
 import { getDb } from '@/lib/db';
-import { localizeMilestoneTitle } from '@/lib/flags';
+import { localizeMilestoneTitle, loadLocMap } from '@/lib/flags';
 import { detectEventChains, type SaveEvidence } from '@/lib/event-chain-detector';
+import { isNoiseFlag, loadKnownFlags } from '@/lib/noise-filter';
 
 export async function GET(
   _req: NextRequest,
@@ -17,10 +18,14 @@ export async function GET(
 
   const saves = getSaves(campaignId);
   const db = getDb();
-  const milestones = getMilestones(campaignId).map(milestone => ({
-    ...milestone,
-    title: localizeMilestoneTitle(milestone.raw_flag, milestone.title, db),
-  }));
+  loadLocMap(db); // pre-load localisation for fast flag translation
+  loadKnownFlags(db); // pre-load known flags for noise filtering
+  const milestones = getMilestones(campaignId)
+    .filter(m => !m.raw_flag || !isNoiseFlag(m.raw_flag))
+    .map(milestone => ({
+      ...milestone,
+      title: localizeMilestoneTitle(milestone.raw_flag, milestone.title, db),
+    }));
   const eventTypes: Record<string, number> = {};
   for (const m of milestones) {
     eventTypes[m.event_type] = (eventTypes[m.event_type] || 0) + 1;
@@ -62,6 +67,16 @@ export async function GET(
     }
   }
 
+  // Enrich with rawFlags from the latest save (includes completion flags etc.)
+  if (rawParsed?.rawFlags) {
+    for (const rf of rawParsed.rawFlags) {
+      if (rf.scope === 'global' || rf.name.startsWith('global_')) {
+        evidence.globalFlags.add(rf.name);
+      } else {
+        evidence.countryFlags.add(rf.name);
+      }
+    }
+  }
   // Enrich with real fired events from the parsed save
   if (rawParsed?.fired_events?.recent) {
     for (const eid of rawParsed.fired_events.recent) {

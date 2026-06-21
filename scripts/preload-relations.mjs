@@ -35,15 +35,25 @@ function cleanLocalisationValue(text, locMap) {
   return cleaned.trim() || text;
 }
 
+/** Recursively walk a directory and yield all .yml file paths */
+function* walkYamlFiles(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) yield* walkYamlFiles(full);
+    else if (entry.name.endsWith('.yml')) yield full;
+  }
+}
+
 function loadLocalisation() {
   const locDir = join(STELLARIS, 'localisation/simp_chinese');
   if (!existsSync(locDir)) return new Map();
 
   const map = new Map();
-  for (const f of readdirSync(locDir).filter(f => f.endsWith('.yml'))) {
-    const content = readFileSync(join(locDir, f), 'utf-8');
+  for (const filePath of walkYamlFiles(locDir)) {
+    const content = readFileSync(filePath, 'utf-8');
     for (const line of content.split('\n')) {
-      const t = line.trim();
+      const stripped = line.replace(/\s+#.*$/, '');
+      const t = stripped.trim();
       if (!t || t.startsWith('#') || t.startsWith('l_')) continue;
       let m = t.match(/^([\w.]+):\s+"(.+)"$/) || t.match(/^([\w.]+):\d+\s+"(.+)"$/);
       if (!m) continue;
@@ -499,6 +509,50 @@ export function syncRelations(db, { changed, isFirst }) {
           root_node_id: null,
           source: 'native',
         });
+
+        // Build chain nodes from counter definitions (each counter max = stage count)
+        const counter = val.counter;
+        if (counter && isBlockNode(counter)) {
+          let stageOrder = 0;
+          for (const [counterName, counterVal] of Object.entries(counter)) {
+            if (!isBlockNode(counterVal)) continue;
+            const max = counterVal.max;
+            if (typeof max === 'number' && max > 1) {
+              // Create a node for each counter value (1..max)
+              for (let i = 1; i <= max; i++) {
+                stageOrder++;
+                const nodeId = `${key}.${counterName}.${i}`;
+                // Register the node
+                if (!nodeSet.has(`counter:${nodeId}`)) {
+                  nodeSet.add(`counter:${nodeId}`);
+                  nodes.push({
+                    id: nodeId,
+                    node_type: 'counter',
+                    title_key: null,
+                    desc_key: null,
+                    zh_title: `${zhTitle} - 阶段${i}/${max}`,
+                    zh_description: null,
+                    file_path: `common/event_chains/${f}`,
+                    raw_text: null,
+                  });
+                }
+                // Add flag: has the counter flag
+                flags.push({
+                  node_id: nodeId,
+                  flag_name: counterName,
+                  operation: 'has',
+                  scope: 'country',
+                });
+                chainNodes.push({
+                  chain_id: key,
+                  node_id: nodeId,
+                  stage_order: stageOrder,
+                  stage_type: i === max ? 'ending' : (i === 1 ? 'start' : 'progress'),
+                });
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -1,22 +1,25 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { flagToTitle } from '@/lib/flags';
+import { flagToTitle, loadLocMap } from '@/lib/flags';
+import { loadKnownFlags } from '@/lib/noise-filter';
 import { getDb } from '@/lib/db';
+
+let _locMap: Map<string, string> | null = null;
 
 function localizeValue(key: string): string {
   if (!key) return '';
-  try {
-    const db = getDb();
-    const row = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(key.toLowerCase()) as { zh_name?: string } | undefined;
-    if (row?.zh_name) return row.zh_name;
+  const locMap = _locMap;
+  if (locMap) {
+    const found = locMap.get(key.toLowerCase());
+    if (found) return found;
     for (const suffix of ['_site', '_dig', '_chain', '_category', '_project']) {
       if (key.endsWith(suffix)) {
-        const r2 = db.prepare('SELECT zh_name FROM game_data WHERE key = ?').get(key.slice(0, -suffix.length).toLowerCase()) as { zh_name?: string } | undefined;
-        if (r2?.zh_name) return r2.zh_name;
+        const f2 = locMap.get(key.slice(0, -suffix.length).toLowerCase());
+        if (f2) return f2;
       }
     }
-  } catch {}
+  }
   if (key === '%SEQ%') return '序列舰队';
   return key.replace(/_/g, ' ').replace(/ CHR /gi, ' ').trim().replace(/\b\w/g, c => c.toUpperCase()) || key;
 }
@@ -38,6 +41,11 @@ export async function POST() {
     });
 
     let totalImported = 0;
+
+    // Pre-load known flags + localisation map once
+    const db = getDb();
+    loadKnownFlags(db);
+    _locMap = loadLocMap(db);
 
     for (const campaignDir of campaignDirs) {
       const fullPath = path.join(SAVE_DIR, campaignDir);
@@ -134,30 +142,30 @@ export async function POST() {
           // Enriched milestones
           if (parsed.fleets?.notable) {
             for (const f of parsed.fleets.notable.slice(0, 5)) {
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'military', title: `🚢 舰队: ${localizeValue(f.name)} (${f.ships}舰)`, description: '', importance: 'major', game_key: 'fleet', raw_flag: 'fleet', raw_value: f.name });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: '', event_type: 'military', title: `🚢 舰队: ${localizeValue(f.name)} (${f.ships}舰)`, description: '', importance: 'info', game_key: 'fleet', raw_flag: 'fleet', raw_value: f.name });
             }
           }
           if (parsed.leaders?.top) {
             for (const l of parsed.leaders.top) {
               const cl: Record<string, string> = { scientist: '科学家', admiral: '提督', general: '将军', governor: '总督', ruler: '统治者', official: '官员', commander: '指挥官' };
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'leader', title: `⭐ ${cl[l.class] || l.class}: ${localizeValue(l.name)} (${l.level}级)`, description: l.traits.join(', '), importance: l.level >= 8 ? 'critical' : 'major', game_key: 'leader', raw_flag: `leader_${l.class}`, raw_value: l.name });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: '', event_type: 'leader', title: `⭐ ${cl[l.class] || l.class}: ${localizeValue(l.name)} (${l.level}级)`, description: l.traits.join(', '), importance: 'info', game_key: 'leader', raw_flag: `leader_${l.class}`, raw_value: l.name });
             }
           }
           if (parsed.archaeology?.sites) {
             for (const a of parsed.archaeology.sites) {
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'exploration', title: `🏺 考古: ${localizeValue(a.name)} (阶段${a.stage}/${a.total_stages})`, description: '', importance: 'major', game_key: 'archaeology', raw_flag: 'archaeology', raw_value: a.name });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: '', event_type: 'exploration', title: `🏺 考古: ${localizeValue(a.name)} (阶段${a.stage}/${a.total_stages})`, description: '', importance: 'info', game_key: 'archaeology', raw_flag: 'archaeology', raw_value: a.name });
             }
           }
           if (parsed.situations?.list) {
             for (const s of parsed.situations.list) {
-              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'event', title: `📋 局势: ${s.type}${s.progress ? ` (${s.progress}%)` : ''}`, description: s.target || '', importance: 'major', game_key: 'situation', raw_flag: s.type, raw_value: s.target || null });
+              milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: '', event_type: 'event', title: `📋 局势: ${s.type}${s.progress ? ` (${s.progress}%)` : ''}`, description: s.target || '', importance: 'info', game_key: 'situation', raw_flag: s.type, raw_value: s.target || null });
             }
           }
           if (parsed.diplomacy?.federation_name) {
-            milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'diplomacy', title: `🤝 联邦: ${parsed.diplomacy.federation_name}`, description: '', importance: 'critical', game_key: 'federation', raw_flag: 'federation', raw_value: parsed.diplomacy.federation_name });
+            milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: '', event_type: 'diplomacy', title: `🤝 联邦: ${parsed.diplomacy.federation_name}`, description: '', importance: 'critical', game_key: 'federation', raw_flag: 'federation', raw_value: parsed.diplomacy.federation_name });
           }
           if (parsed.diplomacy?.gc_member) {
-            milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: parsed.game_date, event_type: 'diplomacy', title: '🌐 星海共同体成员', description: '', importance: 'major', game_key: 'galactic_community', raw_flag: 'galactic_community', raw_value: null });
+            milestones.push({ save_id: saveId, campaign_id: campaignId, event_date: '', event_type: 'diplomacy', title: '🌐 星海共同体成员', description: '', importance: 'major', game_key: 'galactic_community', raw_flag: 'galactic_community', raw_value: null });
           }
 
           if (milestones.length > 0) insertMilestones(milestones);
@@ -170,7 +178,7 @@ export async function POST() {
 
     return NextResponse.json({ ok: true, imported: totalImported });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: '批量导入失败' }, { status: 500 });
   }
 }
 
