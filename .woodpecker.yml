@@ -1,0 +1,24 @@
+when:
+  branch: main
+  event: push
+
+steps:
+  - name: build-and-deploy
+    image: docker:cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      # Build the Docker image
+      - docker build -t stellaris-novel:latest .
+      # Remove old container if exists
+      - docker stop stellaris-novel 2>/dev/null || true
+      - docker rm stellaris-novel 2>/dev/null || true
+      # Start the new container
+      - docker run -d \
+          --name stellaris-novel \
+          --restart unless-stopped \
+          --network app-network \
+          -p 3000:3000 \
+          stellaris-novel:latest
+      # Clean up old images
+      - docker image prune -f

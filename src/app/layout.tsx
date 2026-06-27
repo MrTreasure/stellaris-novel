@@ -21,7 +21,9 @@ export default function RootLayout({
       style={{ colorScheme: 'dark' }}
     >
       <body className="min-h-full flex flex-col">
-        <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0310317750684c17888142a9332dc71a"}'></script><!-- End Cloudflare Web Analytics -->
+        {/* Cloudflare Web Analytics */}
+        <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "0310317750684c17888142a9332dc71a"}' />
+        {/* End Cloudflare Web Analytics */}
         <a href="#main-content" className="skip-link">跳至主要内容</a>
         <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden" aria-hidden="true">
           <Image
